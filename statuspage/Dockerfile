@@ -20,4 +20,5 @@ COPY --from=build /app /app
 COPY --from=build /data /data
 WORKDIR /app
 EXPOSE 80 443 8080
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 CMD ["/app/statuspage","healthcheck"]
 ENTRYPOINT ["/app/statuspage"]

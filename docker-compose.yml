@@ -1,0 +1,43 @@
+services:
+  panel:
+    build:
+      context: ./statuspage
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      PORT: "8080"
+      INTERNAL_PORT: "8081"
+      CHECKER_URL: "http://127.0.0.1:2112"
+      SUBSCRIPTION_URL: "${SUBSCRIPTION_URL:-}"
+      DB_DRIVER: "${DB_DRIVER:-sqlite}"
+      DB_PATH: "/data/status.db"
+      DB_DSN: "${DB_DSN:-}"
+      TZ: "${TZ:-UTC}"
+      PANEL_CHECKER_INTERNAL_TOKEN: "${PANEL_CHECKER_INTERNAL_TOKEN:?set PANEL_CHECKER_INTERNAL_TOKEN}"
+      PANEL_ADMIN_TOKEN: "${PANEL_ADMIN_TOKEN:?set PANEL_ADMIN_TOKEN}"
+      PANEL_PUBLIC_URL: "${PANEL_PUBLIC_URL:-http://127.0.0.1:8080}"
+      UDP_RECEIVER_IMAGE: "${UDP_RECEIVER_IMAGE:-ghcr.io/uumaruu/xray-checker-udp-receiver:latest}"
+      BOT_TOKEN: "${BOT_TOKEN:-}"
+      BOT_ADMIN_IDS: "${BOT_ADMIN_IDS:-}"
+      NOTIFY_CHAT_IDS: "${NOTIFY_CHAT_IDS:-}"
+    volumes:
+      - panel-data:/data
+
+  checker:
+    build:
+      context: .
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      panel:
+        condition: service_healthy
+    environment:
+      SUBSCRIPTION_URL: "http://127.0.0.1:8081/sub"
+      SUBSCRIPTION_JSON_FORMAT: "${SUBSCRIPTION_JSON_FORMAT:-true}"
+      PANEL_CHECKER_INTERNAL_TOKEN: "${PANEL_CHECKER_INTERNAL_TOKEN:?set PANEL_CHECKER_INTERNAL_TOKEN}"
+      UDP_PANEL_URL: "http://127.0.0.1:8081"
+      PROXY_CHECK_INTERVAL: "${PROXY_CHECK_INTERVAL:-30}"
+      XRAY_LOG_LEVEL: "${XRAY_LOG_LEVEL:-none}"
+
+volumes:
+  panel-data:

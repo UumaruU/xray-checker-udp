@@ -1,113 +1,114 @@
-# Xray Checker
+# xray-checker-udp
 
-<div align="center">
+`xray-checker-udp` — форк Xray Checker с независимым TCP+UDP-мониторингом Xray/VLESS-узлов и Go Panel. TCP-проверки upstream (`ip`, `status`, `download`) сохранены, а UDP измеряется по реальному пути через Xray:
 
-[![GitHub Release](https://img.shields.io/github/v/release/kutovoys/xray-checker?color=blue)](https://github.com/kutovoys/xray-checker/releases/latest)
-[![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/kutovoys/xray-checker/build-publish.yml)](https://github.com/kutovoys/xray-checker/actions/workflows/build-publish.yml)
-[![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/kutovoys/xray-checker/total?logo=github&color=blue)](https://github.com/kutovoys/xray-checker/releases/latest)
-[![Docker Pulls](https://img.shields.io/docker/pulls/kutovoys/xray-checker?logo=docker&label=pulls)](https://hub.docker.com/r/kutovoys/xray-checker/)
-[![GitHub License](https://img.shields.io/github/license/kutovoys/xray-checker?color=greeen)](https://github.com/kutovoys/xray-checker/blob/main/LICENSE)
-[![ru](https://img.shields.io/badge/lang-ru-blue)](https://github.com/kutovoys/xray-checker/blob/main/README_RU.md)
-[![en](https://img.shields.io/badge/lang-en-red)](https://github.com/kutovoys/xray-checker/blob/main/README.md)
+`Checker → локальный SOCKS5 UDP ASSOCIATE → Xray outbound → Receiver → Xray → Checker`.
 
-</div>
-<div align="center">
+Прямой `Checker → Receiver` UDP используется только для здоровья измерительной инфраструктуры и не подменяет VPN-измерение.
 
-[![Documentation](https://img.shields.io/badge/Docs-xray--checker.kutovoy.dev-blue)](https://xray-checker.kutovoy.dev/)
-[![DockerHub](https://img.shields.io/badge/DockerHub-kutovoys%2Fxray--checker-blue)](https://hub.docker.com/r/kutovoys/xray-checker/)
-[![Live Demo](https://img.shields.io/badge/Demo-live-green)](https://demo-xray-checker.kutovoy.dev/)
-[![Telegram Chat](https://img.shields.io/badge/Telegram-Chat-blue?logo=telegram&)](https://t.me/+uZCGx_FRY0tiOGIy)
+## Что уже есть
 
-</div>
+- Realtime по умолчанию: `10 probes/s` на каждый `VLESS × Receiver` path.
+- Одна persistent SOCKS5 UDP association на Xray node, общая для всех его Receiver.
+- Bounded scheduler/queues/pending map; нет goroutine или timer на каждую probe.
+- Компактный HMAC-SHA256 UDP-протокол, replay protection, timestamp skew check и rate limit.
+- Один Receiver работает полноценно; при `2+` автоматически работает взаимная Receiver mesh-диагностика.
+- Receiver можно ставить на уже существующий VLESS-сервер. Его локальный VLESS SID автоматически исключается из `VLESS → Receiver`, но Receiver peer health остаётся включён.
+- Выбор Receiver для node: `All`, `Selected`, `Automatic`.
+- UDP states: `ONLINE`, `DEGRADED`, `OFFLINE`, `UNKNOWN`, `UNSUPPORTED`, `DISABLED`.
+- Receiver states: `HEALTHY`, `DEGRADED`, `UNREACHABLE`, `UNKNOWN`.
+- Неисправный/недостоверный Receiver не ухудшает статус VLESS. При одном исправном Receiver диагностика продолжает работать.
+- 24 часа обработанных 100 ms `RTT/loss` slot-результатов в компактных DB blocks; исходные UDP-пакеты не сохраняются. Дальше — агрегаты.
+- SQLite и PostgreSQL через существующий Panel store.
+- SSE live stream, event IDs/heartbeat и playback buffer по умолчанию `1 s`: 10 реальных точек воспроизводятся по исходным timestamps, а не рисуются одним burst.
+- Missing measurement из-за локальной перегрузки — просто отсутствие точки, не `LOSS` и не скрытый `LOCAL_DROP`.
+- Self-monitoring `HEALTHY / HIGH_LOAD / OVERLOADED` и отдельно включаемая автоматика probe rate, Receiver count, display buffer и приоритета проблемных VLESS.
+- UDP/Receiver/global events и Telegram alerts совместимы с существующим ботом.
+- Prometheus UDP metrics и performance estimator в Panel.
 
-Xray Checker is a tool for monitoring proxy server availability with support for VLESS, VMess, Trojan, and Shadowsocks protocols. It automatically tests connections through Xray Core and provides metrics for Prometheus, as well as API endpoints for integration with monitoring systems.
+## Быстрый старт
 
-<div align="center">
-  <img src=".github/screen/xray-checker.webp" alt="Dashboard Screenshot">
-</div>
-
-> [!TIP]
-> **Try the Live Demo:** See Xray Checker in action at [demo-xray-checker.kutovoy.dev](https://demo-xray-checker.kutovoy.dev/)
-
-## 🚀 Key Features
-
-- 🔍 Monitoring of Xray proxy servers (VLESS, VMess, Trojan, Shadowsocks)
-- 🔄 Automatic configuration updates from subscription (multiple subscriptions supported)
-- 📊 Prometheus metrics export with Pushgateway support
-- 🌐 REST API with OpenAPI/Swagger documentation
-- 🌓 Web interface with dark/light theme
-- 🎨 Full web customization (custom logo, styles, or entire template)
-- 📄 Public status page for VPN services (no authentication required)
-- 📥 Endpoints for monitoring system integration (Uptime Kuma, etc.)
-- 🔒 Basic Auth protection for metrics and web interface
-- 🐳 Docker and Docker Compose support
-- 🌍 Automatic geo files management (geoip.dat, geosite.dat)
-- 📝 Flexible configuration loading:
-  - URL subscriptions (base64, JSON)
-  - Share links (vless://, vmess://, trojan://, ss://)
-  - JSON configuration files
-  - Folders with configurations
-
-Full list of features available in the [documentation](https://xray-checker.kutovoy.dev/intro/features).
-
-## 🚀 Quick Start
-
-### Docker
+Нужны Docker Compose v2 и два разных случайных секрета для внутренних API.
 
 ```bash
-docker run -d \
-  -e SUBSCRIPTION_URL=https://your-subscription-url/sub \
-  -p 2112:2112 \
-  kutovoys/xray-checker
+export SUBSCRIPTION_URL='https://example.invalid/subscription'
+export PANEL_CHECKER_INTERNAL_TOKEN='replace-with-long-random-token'
+export PANEL_ADMIN_TOKEN='replace-with-another-long-random-token'
+docker compose up -d --build
 ```
 
-### Docker Compose
+Panel: `http://SERVER:8080/`
+UDP admin: `http://SERVER:8080/udp-admin`
+Checker/Prometheus: `http://SERVER:2112/`
 
-```yaml
-services:
-  xray-checker:
-    image: kutovoys/xray-checker
-    environment:
-      - SUBSCRIPTION_URL=https://your-subscription-url/sub
-    ports:
-      - "2112:2112"
-```
+Если `SUBSCRIPTION_URL` уже управляется через существующий statuspage/Telegram workflow, его можно не задавать повторно.
 
-Detailed installation and configuration documentation is available at [xray-checker.kutovoy.dev](https://xray-checker.kutovoy.dev/intro/quick-start)
+UDP по умолчанию выключен. В `/udp-admin`:
 
-## 📈 Project Statistics
+1. Введите `PANEL_ADMIN_TOKEN`.
+2. Создайте Receiver (`Name`, публичный IP/FQDN, UDP port, опционально локальный VLESS SID).
+3. Panel выдаст одноразовый bootstrap и готовый Receiver Compose.
+4. Откройте указанный UDP port на сервере Receiver и запустите Compose.
+5. Включите UDP monitoring и выберите `All / Automatic / Selected` для нужных nodes.
 
-<a href="https://star-history.com/#kutovoys/xray-checker&Date">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=kutovoys/xray-checker&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=kutovoys/xray-checker&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=kutovoys/xray-checker&type=Date" />
- </picture>
-</a>
+Сгенерированный Compose использует образ из `UDP_RECEIVER_IMAGE`. Для локальной разработки укажите собственный собранный tag; наличие GHCR-образа зависит от реально выполненного release workflow.
 
-## 🤝 Contributing
+## Receiver на том же сервере, что VLESS
 
-We welcome any contributions to Xray Checker! If you want to help:
+Это рекомендуемый вариант, когда нет смысла покупать отдельные VPS. При создании Receiver укажите `Local VLESS SID`: Panel навсегда удерживает этот SID в exclusions для данного Receiver. Нулевой локальный RTT поэтому не искажает VPN-статистику.
 
-1. Fork the repository
-2. Create a branch for your changes
-3. Make and test your changes
-4. Create a Pull Request
+Например, при `DE/SE/FI/NL` каждый VLESS проверяется с остальных трёх серверов, а все четыре Receiver продолжают взаимные медленные peer probes. Центральный Checker коррелирует эти наблюдения; сами Receiver не решают, кто виноват.
 
-For more details on how to contribute, read the [contributor's guide](https://xray-checker.kutovoy.dev/contributing/development-guide).
+## Статусы и доверие
 
-<p align="center">
-Thanks to the all contributors who have helped improve Xray Checker:
-</p>
-<p align="center">
-<a href="https://github.com/kutovoys/xray-checker/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=kutovoys/xray-checker" />
-</a>
-</p>
-<p align="center">
-  Made with <a rel="noopener noreferrer" target="_blank" href="https://contrib.rocks">contrib.rocks</a>
-</p>
+- `ONLINE`: все достоверные path-наблюдения нормальные.
+- `DEGRADED`: хотя бы один достоверный path подтверждённо плохой, при этом не все offline; regional disagreement не скрывается majority vote.
+- `OFFLINE`: все доступные достоверные направления подтверждённо offline.
+- `UNKNOWN`: достоверных Receiver/измерений недостаточно или monitoring infrastructure недостоверна.
+- `UNSUPPORTED`: Xray node не поддерживает нужный UDP path.
+- `DISABLED`: UDP выключен глобально или для node.
 
-## VPN Recommendation
+`DEGRADED/UNREACHABLE/UNKNOWN` Receiver с недостаточным confidence не может массово превратить VLESS nodes в outage.
 
-For secure and reliable internet access, we recommend [BlancVPN](https://getblancvpn.com/pricing?promo=klugscl&ref=xc-readme). Use promo code `KLUGSCL` for 15% off your subscription.
+## Перегрузка
+
+Главный сигнал — фактическое отставание обработки: scheduler lag, bounded queues и локальные omissions. CPU/RAM сами по себе не являются причиной объявить VPN плохим.
+
+При нормальной нагрузке никакого adaptive sampling нет. Только после подтверждённого `OVERLOADED` автоматика, если разрешена в Panel, сначала снижает Hz у стабильных nodes, затем при более тяжёлой перегрузке сокращает активные Receiver. Проблемные nodes можно оставить на полной частоте. После восстановления параметры возвращаются автоматически.
+
+Display buffer (`1 s` по умолчанию) сглаживает доставку live batch, но не считается вычислительным запасом и не уменьшает CPU load.
+
+## История и график
+
+Каждый ожидаемый slot кодируется одним `uint16`: RTT с шагом 250 µs либо `MISSING / INVALID / LOSS`. Timestamp восстанавливается из начала блока и интервала. Высокоточные результаты хранятся 24 часа по умолчанию; пакетные payloads не сохраняются.
+
+`/api/udp/live` — SSE, `/api/udp/history` — compact raw + aggregates. Browser хранит только короткое live-окно. Canvas соединяет соседние реальные RTT визуальной линией, но интерполяция никогда не попадает в DB/API/statistics.
+
+## Prometheus
+
+Основные серии: `udp_probe_sent_total`, `udp_probe_received_total`, `udp_probe_timeout_total`, `udp_probe_invalid_total`, `udp_scheduler_lag_seconds`, `udp_scheduler_queue`, `udp_scheduler_dropped_total`, `udp_active_associations`, `udp_association_reconnect_total`, `udp_rtt_milliseconds`, `udp_rtt_p95_milliseconds`, `udp_jitter_milliseconds`, `udp_loss_ratio`, Receiver health и config metrics.
+
+## NAT, firewall и IPv6
+
+- Receiver принимает UDP на заданном `RECEIVER_UDP_PORT`; этот порт должен быть достижим с Xray outbound-сетей и других Receiver.
+- Heartbeat идёт исходящим HTTPS к `PANEL_URL`; отдельный входящий control port Receiver не нужен.
+- За NAT нужен UDP port-forward. FQDN разрешён; IPv4/IPv6 адреса кодируются SOCKS5 UDP согласно ATYP.
+- Не полагайтесь на IP whitelist как на аутентификацию: data plane подписан HMAC.
+
+## Обновление, backup и rollback
+
+Перед обновлением сохраните Panel volume/SQLite DB (или сделайте backup PostgreSQL) и Receiver `/data`. UDP migration добавляет новые таблицы и не меняет семантику существующей TCP history. UDP по умолчанию можно оставить выключенным до регистрации Receiver.
+
+Для rollback остановите новый stack, восстановите предыдущие images/binaries и backup DB. Receiver credentials находятся только в его `/data`; потеря volume означает повторную регистрацию.
+
+## Диагностика
+
+Проверяйте цепочку по порядку: global UDP → node UDP/support → config revision → Receiver heartbeat → direct UDP → Receiver peer mesh → SOCKS5 association → Xray outbound → proxied response → aggregation → Checker→Panel batch → DB/SSE → browser playback. Secrets в diagnostics не выводятся.
+
+Подробности: [ARCHITECTURE.md](ARCHITECTURE.md), [UDP_PROTOCOL.md](UDP_PROTOCOL.md), [SETTINGS.md](SETTINGS.md), [SECURITY.md](SECURITY.md), [UPSTREAM.md](UPSTREAM.md).
+
+## Upstream и лицензии
+
+Основной код основан на `kutovoys/xray-checker` (AGPL-3.0). Go statuspage импортирован из `Mrvibecodic/xray-checker-statuspage` (MIT; его `statuspage/LICENSE` сохранён). Точные ветки/SHA/даты и границы модификаций указаны в [UPSTREAM.md](UPSTREAM.md).
+
+Этот репозиторий распространяется по AGPL-3.0; см. `LICENSE`.

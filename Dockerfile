@@ -6,8 +6,8 @@ ARG TARGETOS
 ARG TARGETARCH
 ARG GIT_TAG
 ARG GIT_COMMIT
-ARG USERNAME=kutovoys
-ARG REPOSITORY_NAME=xray-checker
+ARG USERNAME=UumaruU
+ARG REPOSITORY_NAME=xray-checker-udp
 
 ENV CGO_ENABLED=0
 ENV GO111MODULE=on
@@ -29,8 +29,8 @@ RUN CGO_ENABLED=${CGO_ENABLED} GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
 
 FROM alpine:3.21
 
-ARG USERNAME=kutovoys
-ARG REPOSITORY_NAME=xray-checker
+ARG USERNAME=UumaruU
+ARG REPOSITORY_NAME=xray-checker-udp
 
 LABEL org.opencontainers.image.source=https://github.com/${USERNAME}/${REPOSITORY_NAME}
 
@@ -44,4 +44,5 @@ COPY --from=builder /usr/bin/xray-checker /usr/bin/xray-checker
 
 USER appuser
 
+HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 CMD ["curl","-fsS","http://127.0.0.1:2112/health"]
 ENTRYPOINT ["/usr/bin/xray-checker"]

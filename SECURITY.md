@@ -1,20 +1,33 @@
-# Security Policy
+# Security
 
-## Reporting Potential Security Issues
+## Границы доверия
 
-If you have encountered a potential security vulnerability in this project, please report it to us at security@kutovoy.dev. We will work with you to verify the vulnerability and patch it.
+Panel — control plane и source of truth. Checker получает UDP config только с `PANEL_CHECKER_INTERNAL_TOKEN`; admin API защищён отдельным `PANEL_ADMIN_TOKEN`. Не используйте один token для обеих ролей и не публикуйте внутренний Panel port `8081` наружу.
 
-When reporting issues, please provide the following information:
+Receiver registration использует single-use bootstrap token с expiry 30 минут. После первого успешного exchange Panel удаляет bootstrap hash и выдаёт permanent bearer credential. Receiver сохраняет его в `/data/receiver-state.json` с mode `0600`.
 
-- Component(s) affected
-- A description indicating how to reproduce the issue
-- A summary of the security vulnerability and impact
-  We request that you contact us via the email address above and give the project contributors a chance to resolve the vulnerability and issue a new release prior to any public exposure; this helps protect the project's users, and provides them with a chance to upgrade and/or update in order to protect their applications.
+Data-plane keys генерируются случайно и Panel хранит их через existing encrypted secret store (`SECRET_KEY`/локальный secret key). API/логи/UI не должны показывать их после bootstrap/config transport.
 
-## Policy
+## UDP data plane
 
-If we verify a reported security vulnerability, our policy is:
+- packet size жёстко ограничен `<=256` bytes;
+- HMAC-SHA256 обязателен;
+- framing/version/payload length проверяются до обработки;
+- clock skew ограничен;
+- replay cache bounded;
+- per-source/global rate limiting bounded;
+- response не больше request;
+- неизвестные/invalid packets не превращают сервис в generic echo;
+- IP whitelist можно использовать как дополнительный firewall, но не вместо cryptographic authentication.
 
-- We will patch the current release branch, as well as the immediate prior minor release branch.
+При компрометации Receiver считайте его data/control credentials скомпрометированными. Для v0.1.0 безопасный operational recovery — отключить этот Receiver в Panel, удалить его `/data`, создать новую Receiver registration и заменить deployment.
 
-- After patching the release branches, we will immediately issue new security fix releases for each patched release branch.
+## Network deployment
+
+Публикуйте наружу только действительно нужные порты: Panel/reverse proxy, Checker metrics при необходимости и UDP port каждого Receiver. Внутренний Checker↔Panel API держите на loopback/private network. Receiver health HTTP listener по умолчанию только `127.0.0.1` внутри контейнера.
+
+За reverse proxy используйте HTTPS для public Panel/Receiver heartbeat. Не вставляйте bearer/bootstrap/data keys в URL, labels Prometheus или diagnostics.
+
+## Reporting
+
+Для уязвимостей upstream-составляющих сначала сверяйтесь с их security policy. Для изменений этого fork не публикуйте рабочие credentials или subscription URLs в issue/логах; приложите минимальный redacted reproducer.
