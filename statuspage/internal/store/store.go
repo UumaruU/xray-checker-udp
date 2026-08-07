@@ -146,6 +146,32 @@ func (s *Store) migrate() error {
 			chat_id BIGINT, key TEXT, value TEXT, PRIMARY KEY(chat_id, key))`,
 		`CREATE TABLE IF NOT EXISTS assets(
 			k TEXT PRIMARY KEY, mime TEXT, data ` + s.d.blob() + `)`,
+		`CREATE TABLE IF NOT EXISTS udp_receivers(
+			id TEXT PRIMARY KEY, name TEXT NOT NULL, host TEXT NOT NULL, udp_port BIGINT NOT NULL,
+			location TEXT, description TEXT, enabled BIGINT DEFAULT 1, local_node_sid TEXT,
+			bootstrap_hash TEXT, bootstrap_expires BIGINT, bootstrap_used BIGINT DEFAULT 0,
+			token_hash TEXT, registered_ts BIGINT DEFAULT 0, heartbeat_ts BIGINT DEFAULT 0,
+			version TEXT, applied_revision BIGINT DEFAULT 0, desired_revision BIGINT DEFAULT 1,
+			health_json TEXT, created_ts BIGINT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS udp_receiver_exclusions(
+			receiver_id TEXT NOT NULL, node_sid TEXT NOT NULL,
+			PRIMARY KEY(receiver_id,node_sid))`,
+		`CREATE TABLE IF NOT EXISTS udp_node_settings(
+			node_sid TEXT PRIMARY KEY, enabled BIGINT DEFAULT 1, receiver_mode TEXT DEFAULT 'all',
+			selected_receivers TEXT DEFAULT '[]', diagnostic BIGINT DEFAULT 0)`,
+		`CREATE TABLE IF NOT EXISTS udp_raw_blocks(
+			node_sid TEXT NOT NULL, receiver_id TEXT NOT NULL, start_ms BIGINT NOT NULL,
+			interval_us BIGINT NOT NULL, samples ` + s.d.blob() + ` NOT NULL,
+			PRIMARY KEY(node_sid,receiver_id,start_ms,interval_us))`,
+		`CREATE INDEX IF NOT EXISTS idx_udp_raw_retention ON udp_raw_blocks(start_ms)`,
+		`CREATE TABLE IF NOT EXISTS udp_aggregates(
+			ts BIGINT NOT NULL, node_sid TEXT NOT NULL, receiver_id TEXT NOT NULL,
+			state TEXT NOT NULL, median_us BIGINT, p95_us BIGINT, jitter_us BIGINT,
+			loss REAL, coverage REAL, samples BIGINT, PRIMARY KEY(ts,node_sid,receiver_id))`,
+		`CREATE INDEX IF NOT EXISTS idx_udp_aggregates_node_ts ON udp_aggregates(node_sid,ts)`,
+		`CREATE TABLE IF NOT EXISTS udp_events(
+			id ` + s.d.pk() + `, ts BIGINT NOT NULL, kind TEXT NOT NULL,
+			node_sid TEXT, receiver_id TEXT, details TEXT)`,
 	}
 	for _, q := range stmts {
 		if _, err := s.exec(q); err != nil {

@@ -1,12 +1,15 @@
 package web
 
 import (
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"xray-status/internal/config"
+	"xray-status/internal/poller"
 	"xray-status/internal/store"
 	"xray-status/internal/sub"
 )
@@ -15,18 +18,35 @@ import (
 // публикуется наружу). Отдаёт чекеру объединённую подписку по /sub: несколько
 // upstream-подписок склеиваются в один список/JSON (ПЛАН §8.2, §13).
 type Internal struct {
-	cfg    config.Config
-	st     *store.Store
-	client *http.Client
+	cfg              config.Config
+	st               *store.Store
+	client           *http.Client
+	udpMu            sync.Mutex
+	lastUDPCleanup   time.Time
+	lastUDPPersist   time.Time
+	lastUDPBrowser   time.Time
+	udpPending       map[string]store.UDPLiveBlockRow
+	udpBrowserBlocks []udpLiveBlockRequest
+	udpBrowserLatest map[string]json.RawMessage
+	udpOnEvent       func(poller.Event)
+	udpNodeState     map[string]string
+	udpReceiverState map[string]udpReceiverAlertState
+	udpGlobalKnown   bool
+	udpGlobalUnknown bool
+	udpGlobalAlerted bool
 }
 
 func NewInternal(cfg config.Config, st *store.Store) *Internal {
-	return &Internal{cfg: cfg, st: st, client: &http.Client{Timeout: 15 * time.Second}}
+	return &Internal{cfg: cfg, st: st, client: &http.Client{Timeout: 15 * time.Second}, udpPending: make(map[string]store.UDPLiveBlockRow), udpNodeState: make(map[string]string), udpReceiverState: make(map[string]udpReceiverAlertState)}
 }
+
+func (in *Internal) OnUDPEvent(fn func(poller.Event)) { in.udpOnEvent = fn }
 
 func (in *Internal) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/sub", in.sub)
+	mux.HandleFunc("/api/v1/udp/config", in.udpCheckerConfig)
+	mux.HandleFunc("/api/v1/udp/batch", in.udpBatch)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("OK"))
 	})

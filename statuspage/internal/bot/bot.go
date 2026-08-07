@@ -352,10 +352,12 @@ func (tb *Bot) HandleEvent(e poller.Event) {
 			return // алерты по этому серверу заглушены админом (🔕 Тихие серверы)
 		}
 	}
-	if e.Type == poller.EventServerDown || e.Type == poller.EventServerUp {
+	if e.Type == poller.EventServerDown || e.Type == poller.EventServerUp || strings.HasPrefix(string(e.Type), "udp_") {
 		if !tb.st.AlertOnDown() {
 			return
 		}
+	}
+	if e.Type == poller.EventServerDown || e.Type == poller.EventServerUp {
 		down := e.Type == poller.EventServerDown
 		tb.mu.Lock()
 		prev, seen := tb.lastDown[e.Name]

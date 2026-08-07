@@ -42,11 +42,15 @@ type Config struct {
 
 	// Bootstrap для будущих фаз (бот/контроль). Парсим заранее, чтобы
 	// docker-compose уже был стабильным; в M0/M1 не используются.
-	BotToken      string
-	BotAdminIDs   []int64
-	NotifyTargets []NotifyTarget
-	SecretKey     string
-	ControlCaps   []string
+	BotToken             string
+	BotAdminIDs          []int64
+	NotifyTargets        []NotifyTarget
+	SecretKey            string
+	ControlCaps          []string
+	CheckerInternalToken string
+	PanelAdminToken      string
+	PanelPublicURL       string
+	ReceiverImage        string
 
 	UpdateURL       string
 	UpdateSHA256URL string
@@ -162,11 +166,15 @@ func Load() Config {
 		StaleAfterHours:   atoi("STALE_AFTER_HOURS", 0),
 		GlobalOutageRatio: atof("GLOBAL_OUTAGE_RATIO", 1.0),
 
-		BotToken:      getenv("BOT_TOKEN", ""),
-		BotAdminIDs:   splitInt64("BOT_ADMIN_IDS"),
-		NotifyTargets: parseNotifyTargets("NOTIFY_CHAT_IDS"),
-		SecretKey:     getenv("SECRET_KEY", ""),
-		ControlCaps:   caps,
+		BotToken:             getenv("BOT_TOKEN", ""),
+		BotAdminIDs:          splitInt64("BOT_ADMIN_IDS"),
+		NotifyTargets:        parseNotifyTargets("NOTIFY_CHAT_IDS"),
+		SecretKey:            getenv("SECRET_KEY", ""),
+		ControlCaps:          caps,
+		CheckerInternalToken: getenv("PANEL_CHECKER_INTERNAL_TOKEN", ""),
+		PanelAdminToken:      getenv("PANEL_ADMIN_TOKEN", ""),
+		PanelPublicURL:       strings.TrimRight(getenv("PANEL_PUBLIC_URL", ""), "/"),
+		ReceiverImage:        getenv("UDP_RECEIVER_IMAGE", "ghcr.io/uumaruu/xray-checker-udp-receiver:latest"),
 
 		UpdateURL:       getenv("UPDATE_URL", defUpdateURL),
 		UpdateSHA256URL: getenv("UPDATE_SHA256_URL", defUpdateURL+".sha256"),

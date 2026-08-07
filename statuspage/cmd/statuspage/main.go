@@ -23,6 +23,22 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
+		port := os.Getenv("INTERNAL_PORT")
+		if port == "" {
+			port = "8081"
+		}
+		client := &http.Client{Timeout: 2 * time.Second}
+		resp, err := client.Get("http://127.0.0.1:" + port + "/healthz")
+		if err != nil || resp.StatusCode != http.StatusOK {
+			if resp != nil {
+				_ = resp.Body.Close()
+			}
+			os.Exit(1)
+		}
+		_ = resp.Body.Close()
+		return
+	}
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
 
@@ -103,11 +119,18 @@ func main() {
 
 	// Внутренний сервер (только docker-сеть, порт не публикуется): отдаёт чекеру
 	// отфильтрованную подписку по /sub.
+	internal := web.NewInternal(cfg, st)
+	internal.OnUDPEvent(func(e poller.Event) {
+		slog.Info("udp event", "type", e.Type, "name", e.Name)
+		if tb != nil {
+			tb.HandleEvent(e)
+		}
+	})
 	internalSrv := &http.Server{
 		// Только loopback: при network_mode: host это закрывает 8081 от внешней
 		// сети, но чекер (localhost:8081/sub) в той же host-сети до него достаёт.
 		Addr:              "127.0.0.1:" + cfg.InternalPort,
-		Handler:           web.NewInternal(cfg, st).Handler(),
+		Handler:           internal.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		WriteTimeout:      30 * time.Second,
 	}

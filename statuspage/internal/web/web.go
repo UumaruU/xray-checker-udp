@@ -26,7 +26,7 @@ import (
 	"xray-status/internal/summary"
 )
 
-//go:embed assets/index.html.tpl assets/index2.html.tpl assets/index3.html.tpl assets/logo.svg assets/flags
+//go:embed assets/index.html.tpl assets/index2.html.tpl assets/index3.html.tpl assets/udp_admin.html assets/logo.svg assets/flags
 var assets embed.FS
 
 // uniqTokens — те же CSS/JS-токены, что рандомизирует Python-версия для
@@ -104,6 +104,17 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/flags/", s.flagHandler)
 	mux.HandleFunc("/favicon.ico", s.faviconHandler)
 	mux.HandleFunc("/favicon.png", s.faviconHandler)
+	mux.HandleFunc("/api/v1/udp/receivers/register", s.receiverRegister)
+	mux.HandleFunc("/api/v1/udp/receivers/", s.receiverHeartbeat)
+	mux.HandleFunc("/api/admin/udp/receivers", s.adminUDPReceivers)
+	mux.HandleFunc("/api/admin/udp/receivers/", s.adminUDPReceiver)
+	mux.HandleFunc("/api/admin/udp/settings", s.adminUDPSettings)
+	mux.HandleFunc("/api/admin/udp/nodes", s.adminUDPNodes)
+	mux.HandleFunc("/api/admin/udp/nodes/", s.adminUDPNode)
+	mux.HandleFunc("/api/udp/live", s.udpLive)
+	mux.HandleFunc("/api/udp/snapshot", s.udpSnapshot)
+	mux.HandleFunc("/api/udp/history", s.udpHistory)
+	mux.HandleFunc("/udp-admin", s.udpAdmin)
 	return s.baseHeaders(mux)
 }
 

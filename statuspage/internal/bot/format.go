@@ -150,6 +150,26 @@ func eventText(e poller.Event) string {
 		return fmt.Sprintf("🐢 <b>Высокий пинг:</b> %s — %d мс", htmlEscape(e.Name), e.Latency)
 	case poller.EventPingOK:
 		return fmt.Sprintf("🚀 <b>Пинг в норме:</b> %s — %d мс", htmlEscape(e.Name), e.Latency)
+	case poller.EventUDPOffline:
+		return "🔴 <b>UDP OFFLINE:</b> " + htmlEscape(e.Name)
+	case poller.EventUDPRestored:
+		return "🟢 <b>UDP RESTORED:</b> " + htmlEscape(e.Name)
+	case poller.EventUDPDegraded:
+		return "🟠 <b>UDP DEGRADED:</b> " + htmlEscape(e.Name)
+	case poller.EventUDPNormal:
+		return "✅ <b>UDP NORMAL:</b> " + htmlEscape(e.Name)
+	case poller.EventUDPReceiverHBLost:
+		return "🟠 <b>Receiver heartbeat lost:</b> " + htmlEscape(e.Name)
+	case poller.EventUDPReceiverHBRestored:
+		return "✅ <b>Receiver heartbeat restored:</b> " + htmlEscape(e.Name)
+	case poller.EventUDPReceiverUnreachable:
+		return "🔴 <b>Receiver UDP unreachable:</b> " + htmlEscape(e.Name)
+	case poller.EventUDPReceiverRestored:
+		return "🟢 <b>Receiver UDP restored:</b> " + htmlEscape(e.Name)
+	case poller.EventUDPGlobalUnknown:
+		return "⚠️ <b>UDP monitoring UNKNOWN:</b> измерительная инфраструктура недостоверна; массовые node-alerts подавлены."
+	case poller.EventUDPGlobalRestored:
+		return "✅ <b>UDP monitoring restored:</b> контрольные Receiver снова дают достоверные данные."
 	default:
 		return "" // suspected не шлём, чтобы не спамить до подтверждения
 	}

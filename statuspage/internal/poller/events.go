@@ -5,13 +5,23 @@ import "xray-status/internal/checker"
 type EventType string
 
 const (
-	EventServerDown            EventType = "server_down"
-	EventServerUp              EventType = "server_up"
-	EventGlobalOutageSuspected EventType = "global_suspected"
-	EventGlobalOutageConfirmed EventType = "global_confirmed"
-	EventGlobalOutageCleared   EventType = "global_cleared"
-	EventHighPing              EventType = "high_ping"
-	EventPingOK                EventType = "ping_ok"
+	EventServerDown             EventType = "server_down"
+	EventServerUp               EventType = "server_up"
+	EventGlobalOutageSuspected  EventType = "global_suspected"
+	EventGlobalOutageConfirmed  EventType = "global_confirmed"
+	EventGlobalOutageCleared    EventType = "global_cleared"
+	EventHighPing               EventType = "high_ping"
+	EventPingOK                 EventType = "ping_ok"
+	EventUDPOffline             EventType = "udp_offline"
+	EventUDPRestored            EventType = "udp_restored"
+	EventUDPDegraded            EventType = "udp_degraded"
+	EventUDPNormal              EventType = "udp_normal"
+	EventUDPReceiverHBLost      EventType = "udp_receiver_heartbeat_lost"
+	EventUDPReceiverHBRestored  EventType = "udp_receiver_heartbeat_restored"
+	EventUDPReceiverUnreachable EventType = "udp_receiver_unreachable"
+	EventUDPReceiverRestored    EventType = "udp_receiver_restored"
+	EventUDPGlobalUnknown       EventType = "udp_global_unknown"
+	EventUDPGlobalRestored      EventType = "udp_global_restored"
 )
 
 // Event — событие поллера для нотификаций (ПЛАН §7). Name — «сырое» имя группы;
