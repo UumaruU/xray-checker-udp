@@ -20,7 +20,10 @@ import (
 	"xray-status/internal/store"
 )
 
-const settingKey = "web_enabled"
+const (
+	settingKey        = "web_enabled"
+	settingStateV2Key = "web_enabled_state_v2"
+)
 
 type Controller struct {
 	cfg     config.Config
@@ -42,6 +45,12 @@ func New(cfg config.Config, st *store.Store, handler http.Handler) *Controller {
 // Enabled — должен ли веб-сервер быть поднят (по сохранённому состоянию).
 // По умолчанию (на первом запуске) — да, чтобы страница работала из коробки.
 func (c *Controller) Enabled() bool {
+	// До v2 Start() вызывал Stop(), который мог сохранить web_enabled=0 ещё
+	// до неудачного bind. Один раз игнорируем legacy-состояние, чтобы такие
+	// установки автоматически восстановились после обновления.
+	if c.st.GetSetting(settingStateV2Key, "") == "" {
+		return true
+	}
 	return c.st.GetSetting(settingKey, "1") != "0"
 }
 
@@ -62,7 +71,9 @@ func (c *Controller) domain() string {
 // (чтобы подхватить новый домен). Возвращает ошибку, если основной HTTP-порт
 // занять не удалось.
 func (c *Controller) Start() error {
-	_ = c.Stop() // идемпотентно: сначала гасим прежние слушатели
+	// Перезапуск listener'ов не является пользовательской командой «выключить».
+	// Поэтому здесь не трогаем сохранённый web_enabled.
+	c.stopListeners()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -82,15 +93,6 @@ func (c *Controller) Start() error {
 	servers = append(servers, httpSrv)
 	slog.Info("web: HTTP up", "addr", httpSrv.Addr)
 
-	// доп. :8080 (совместимость/CI) — не критичен
-	if c.cfg.Port != "8080" {
-		alt := &http.Server{Addr: "0.0.0.0:8080", Handler: c.handler, ReadHeaderTimeout: 10 * time.Second, WriteTimeout: 30 * time.Second}
-		if err := listen(alt); err != nil {
-			slog.Warn("web: alt :8080", "err", err)
-		} else {
-			servers = append(servers, alt)
-		}
-	}
 
 	// HTTPS, если задан домен — не критичен (HTTP уже живёт). Источник серта
 	// выбирается по TLS_MODE/CERT_FILE (см. tlsConfigFor): по умолчанию
@@ -120,11 +122,12 @@ func (c *Controller) Start() error {
 	c.servers = servers
 	c.running = true
 	_ = c.st.SetSetting(settingKey, "1")
+	_ = c.st.SetSetting(settingStateV2Key, "1")
 	return nil
 }
 
-// Stop гасит публичные слушатели и помечает веб как выключенный (сохраняется).
-func (c *Controller) Stop() error {
+// stopListeners гасит текущие listener'ы, не меняя пользовательское состояние.
+func (c *Controller) stopListeners() {
 	c.mu.Lock()
 	srvs := c.servers
 	c.servers = nil
@@ -136,7 +139,13 @@ func (c *Controller) Stop() error {
 	for _, s := range srvs {
 		_ = s.Shutdown(ctx)
 	}
+}
+
+// Stop гасит публичные слушатели и помечает веб как явно выключенный.
+func (c *Controller) Stop() error {
+	c.stopListeners()
 	_ = c.st.SetSetting(settingKey, "0")
+	_ = c.st.SetSetting(settingStateV2Key, "1")
 	return nil
 }
 
