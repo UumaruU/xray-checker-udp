@@ -29,6 +29,6 @@ docker-compose.yml
 .DS_Store
 test-files/
 configs/
-geo/
+/geo/
 .claude/
 TODO.md
