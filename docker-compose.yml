@@ -5,7 +5,7 @@ services:
     restart: unless-stopped
     network_mode: host
     environment:
-      PORT: "8080"
+      PORT: "${PANEL_PORT:-8080}"
       INTERNAL_PORT: "8081"
       CHECKER_URL: "http://127.0.0.1:2112"
       SUBSCRIPTION_URL: "${SUBSCRIPTION_URL:-}"
@@ -15,7 +15,7 @@ services:
       TZ: "${TZ:-UTC}"
       PANEL_CHECKER_INTERNAL_TOKEN: "${PANEL_CHECKER_INTERNAL_TOKEN:?set PANEL_CHECKER_INTERNAL_TOKEN}"
       PANEL_ADMIN_TOKEN: "${PANEL_ADMIN_TOKEN:?set PANEL_ADMIN_TOKEN}"
-      PANEL_PUBLIC_URL: "${PANEL_PUBLIC_URL:-http://127.0.0.1:8080}"
+      PANEL_PUBLIC_URL: "${PANEL_PUBLIC_URL:-}"
       UDP_RECEIVER_IMAGE: "${UDP_RECEIVER_IMAGE:-ghcr.io/uumaruu/xray-checker-udp-receiver:latest}"
       BOT_TOKEN: "${BOT_TOKEN:-}"
       BOT_ADMIN_IDS: "${BOT_ADMIN_IDS:-}"
