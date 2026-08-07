@@ -34,11 +34,18 @@
 export SUBSCRIPTION_URL='https://example.invalid/subscription'
 export PANEL_CHECKER_INTERNAL_TOKEN='replace-with-long-random-token'
 export PANEL_ADMIN_TOKEN='replace-with-another-long-random-token'
+export PANEL_PORT='18080'
+export PANEL_PUBLIC_URL='http://SERVER:18080'
 docker compose up -d --build
 ```
 
-Panel: `http://SERVER:8080/`
-UDP admin: `http://SERVER:8080/udp-admin`
+`PANEL_PORT` задаёт внешний HTTP-порт Panel и по умолчанию равен `8080`. Если
+порт занят, укажите любой свободный, например `18080`. Для Receiver задайте
+`PANEL_PUBLIC_URL` как реально доступный адрес Panel (с тем же портом при
+прямом HTTP-доступе; за reverse proxy это обычно обычный HTTPS-домен).
+
+Panel: `http://SERVER:PANEL_PORT/`
+UDP admin: `http://SERVER:PANEL_PORT/udp-admin`
 Checker/Prometheus: `http://SERVER:2112/`
 
 Если `SUBSCRIPTION_URL` уже управляется через существующий statuspage/Telegram workflow, его можно не задавать повторно.
