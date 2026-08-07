@@ -1,7 +1,10 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"net/http"
+	"runtime"
 	"strings"
 	"time"
 	"xray-checker/checker"
@@ -10,6 +13,7 @@ import (
 	"xray-checker/metrics"
 	"xray-checker/models"
 	"xray-checker/subscription"
+	"xray-checker/udpmon"
 	"xray-checker/web"
 	"xray-checker/xray"
 
@@ -93,11 +97,58 @@ func main() {
 		config.CLIConfig.Proxy.CheckConcurrency,
 	)
 
+	udpCtx, stopUDP := context.WithCancel(context.Background())
+	defer stopUDP()
+	var udpRuntime *udpmon.Runtime
+	var udpReporter *udpmon.Reporter
+	var udpReceiverHealth *udpmon.DirectHealthMonitor
+	if config.CLIConfig.UDP.PanelToken != "" {
+		runtimeCfg := udpmon.DefaultRuntimeConfig()
+		runtimeCfg.Workers = runtime.GOMAXPROCS(0)
+		if runtimeCfg.Workers < 2 {
+			runtimeCfg.Workers = 2
+		}
+		if runtimeCfg.Workers > 8 {
+			runtimeCfg.Workers = 8
+		}
+		udpRuntime, err = udpmon.NewRuntime(runtimeCfg)
+		if err != nil {
+			logger.Fatal("Error initializing UDP monitor: %v", err)
+		}
+		receiverHealth, healthErr := udpmon.NewDirectHealthMonitor()
+		if healthErr != nil {
+			logger.Fatal("Error initializing UDP receiver health monitor: %v", healthErr)
+		}
+		reporter := udpmon.NewReporter(config.CLIConfig.UDP.PanelURL, config.CLIConfig.UDP.PanelToken, udpRuntime, receiverHealth)
+		udpReporter = reporter
+		udpReceiverHealth = receiverHealth
+		udpRuntime.OnSample = reporter.Ingest
+		go udpRuntime.Run(udpCtx)
+		go reporter.Run(udpCtx)
+		go func() {
+			if err := receiverHealth.Run(udpCtx); err != nil && udpCtx.Err() == nil {
+				logger.Error("UDP receiver health monitor stopped: %v", err)
+			}
+		}()
+		controlClient := udpmon.NewControlClient(config.CLIConfig.UDP.PanelURL, config.CLIConfig.UDP.PanelToken)
+		refresh := time.Duration(config.CLIConfig.UDP.ConfigRefresh) * time.Second
+		if refresh < time.Second {
+			refresh = 5 * time.Second
+		}
+		go runUDPConfigLoop(udpCtx, controlClient, udpRuntime, receiverHealth, reporter, proxyChecker, config.CLIConfig.Xray.StartPort, refresh)
+		logger.Info("UDP monitor control enabled; Panel remains source of truth")
+	} else {
+		logger.Info("UDP monitor bootstrap token is not configured; TCP monitoring continues unchanged")
+	}
+
 	// The collector renders metrics from the checker's current proxy snapshot on
 	// each scrape, so custom metricsLabels (#124) can change across subscription
 	// updates without resetting other series.
 	registry := prometheus.NewRegistry()
 	registry.MustRegister(metrics.NewCollector(config.CLIConfig.Metrics.Instance, proxyChecker))
+	if udpRuntime != nil {
+		registry.MustRegister(metrics.NewUDPCollector(udpRuntime, udpReporter, udpReceiverHealth))
+	}
 
 	runCheckIteration := func() {
 		logger.Info("Starting proxy check iteration")
@@ -238,6 +289,88 @@ func main() {
 		)
 		if err := http.ListenAndServe(config.CLIConfig.Metrics.Host+":"+config.CLIConfig.Metrics.Port, mux); err != nil {
 			logger.Fatal("Error starting server: %v", err)
+		}
+	}
+}
+
+func runUDPConfigLoop(ctx context.Context, client *udpmon.ControlClient, runtime *udpmon.Runtime, receiverHealth *udpmon.DirectHealthMonitor, reporter *udpmon.Reporter, proxyChecker *checker.ProxyChecker, startPort int, refresh time.Duration) {
+	configTicker := time.NewTicker(refresh)
+	loadTicker := time.NewTicker(time.Second)
+	defer configTicker.Stop()
+	defer loadTicker.Stop()
+	loadController := udpmon.NewLoadController()
+	var currentCfg udpmon.ControlConfig
+	var basePaths []udpmon.PathConfig
+	var applied []udpmon.PathConfig
+	lastLoadStatus := udpmon.LoadStatus{State: udpmon.LoadHealthy, ProbeScale: 1}
+	problemNodes := make(map[string]bool)
+	applyPaths := func(paths []udpmon.PathConfig, status udpmon.LoadStatus) {
+		if !udpmon.PathConfigsEqual(applied, paths) {
+			runtime.SetPaths(paths)
+			applied = paths
+			logger.Info("UDP runtime applied: %d active paths, load=%s level=%d", len(paths), status.State, status.Level)
+		}
+		reporter.UpdateLoad(status)
+	}
+	refreshConfig := func() {
+		cfg, err := client.Fetch(ctx)
+		if err != nil {
+			logger.Warn("UDP config refresh failed: %v", err)
+			return
+		}
+		if err := receiverHealth.SetConfig(cfg); err != nil {
+			reporter.MarkConfigApplyError()
+			logger.Error("UDP receiver health config revision %d rejected: %v", cfg.Revision, err)
+			return
+		}
+		reporter.UpdateConfig(cfg)
+		currentCfg = cfg
+		proxies := proxyChecker.GetProxies()
+		nodes := make([]udpmon.NodeDescriptor, 0, len(proxies))
+		for _, proxy := range proxies {
+			if proxy.StableID == "" {
+				proxy.StableID = proxy.GenerateStableID()
+			}
+			nodes = append(nodes, udpmon.NodeDescriptor{
+				StableID:     proxy.StableID,
+				SocksAddress: fmt.Sprintf("127.0.0.1:%d", startPort+proxy.Index),
+				SupportsUDP:  proxy.Protocol != "http",
+			})
+		}
+		paths, err := udpmon.BuildPaths(cfg, nodes)
+		if err != nil {
+			reporter.MarkConfigApplyError()
+			logger.Error("UDP config revision %d rejected: %v", cfg.Revision, err)
+			return
+		}
+		basePaths = paths
+		lastLoadStatus.PlaybackDelayMS = cfg.Settings.PlaybackDelayMS
+		effective, status := udpmon.ApplyLoadPolicy(basePaths, cfg.Settings, lastLoadStatus, problemNodes)
+		applyPaths(effective, status)
+	}
+	refreshConfig()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-configTicker.C:
+			refreshConfig()
+		case now := <-loadTicker.C:
+			if currentCfg.Revision == 0 {
+				continue
+			}
+			status := loadController.Observe(currentCfg.Settings, runtime.Stats(), reporter.QueueLen(), reporter.QueueCapacity())
+			health := receiverHealth.Snapshot(now)
+			_, nodes := runtime.Aggregates(now, health, currentCfg.Settings.Thresholds())
+			problemNodes = make(map[string]bool)
+			for _, node := range nodes {
+				if node.State == udpmon.StateDegraded || node.State == udpmon.StateOffline {
+					problemNodes[node.NodeID] = true
+				}
+			}
+			effective, status := udpmon.ApplyLoadPolicy(basePaths, currentCfg.Settings, status, problemNodes)
+			lastLoadStatus = status
+			applyPaths(effective, status)
 		}
 	}
 }

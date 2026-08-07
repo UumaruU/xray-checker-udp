@@ -10,11 +10,11 @@ import (
 // outcomes only: a probe that was never executed because of local overload is
 // absent rather than being converted into network loss.
 type Window struct {
-	mu      sync.RWMutex
-	buf     []Sample
-	next    int
-	count   int
-	period  time.Duration
+	mu       sync.RWMutex
+	buf      []Sample
+	next     int
+	count    int
+	period   time.Duration
 	interval time.Duration
 }
 

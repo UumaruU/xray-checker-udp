@@ -77,29 +77,29 @@ type NodeAggregate struct {
 	NodeID               string          `json:"nodeId"`
 	State                State           `json:"state"`
 	Confidence           string          `json:"confidence"`
-	RTT                   time.Duration   `json:"rtt"`
-	P95                   time.Duration   `json:"p95"`
-	Jitter                time.Duration   `json:"jitter"`
-	LossConsensus         float64         `json:"lossConsensus"`
-	LossWorstHealthy      float64         `json:"lossWorstHealthy"`
-	ReceiverSuccessRatio  float64         `json:"receiverSuccessRatio"`
-	ReceiverDisagreement  float64         `json:"receiverDisagreement"`
-	HealthyReceivers      int             `json:"healthyReceivers"`
-	TotalReceivers        int             `json:"totalReceivers"`
-	LastValid             time.Time       `json:"lastValid"`
-	Paths                 []PathAggregate `json:"paths"`
+	RTT                  time.Duration   `json:"rtt"`
+	P95                  time.Duration   `json:"p95"`
+	Jitter               time.Duration   `json:"jitter"`
+	LossConsensus        float64         `json:"lossConsensus"`
+	LossWorstHealthy     float64         `json:"lossWorstHealthy"`
+	ReceiverSuccessRatio float64         `json:"receiverSuccessRatio"`
+	ReceiverDisagreement float64         `json:"receiverDisagreement"`
+	HealthyReceivers     int             `json:"healthyReceivers"`
+	TotalReceivers       int             `json:"totalReceivers"`
+	LastValid            time.Time       `json:"lastValid"`
+	Paths                []PathAggregate `json:"paths"`
 }
 
 type Thresholds struct {
-	OnlineLoss          float64
-	DegradedLoss        float64
-	OfflineLoss         float64
-	Jitter              time.Duration
-	MinSamples          int
-	MinCoverage         float64
-	StaleAfter          time.Duration
-	ReceiverConfidence  float64
-	Disagreement        float64
+	OnlineLoss         float64
+	DegradedLoss       float64
+	OfflineLoss        float64
+	Jitter             time.Duration
+	MinSamples         int
+	MinCoverage        float64
+	StaleAfter         time.Duration
+	ReceiverConfidence float64
+	Disagreement       float64
 }
 
 func DefaultThresholds() Thresholds {

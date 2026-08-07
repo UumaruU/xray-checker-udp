@@ -11,7 +11,7 @@ import (
 // reconstructed as blockStart + slot*probeInterval, so 10Hz consumes only 200
 // bytes/path/10s before DB row/index overhead.
 const (
-	compactTick    = 250 * time.Microsecond
+	compactTick           = 250 * time.Microsecond
 	CompactMissing uint16 = 0xfffd
 	CompactInvalid uint16 = 0xfffe
 	CompactLoss    uint16 = 0xffff
@@ -19,9 +19,9 @@ const (
 )
 
 type CompactBlock struct {
-	StartUnixMS  int64
-	IntervalUS   uint32
-	Slots        []uint16
+	StartUnixMS int64
+	IntervalUS  uint32
+	Slots       []uint16
 }
 
 func NewCompactBlock(start time.Time, interval, duration time.Duration) CompactBlock {
@@ -91,8 +91,8 @@ func UnmarshalCompactBlock(buf []byte) (CompactBlock, error) {
 	}
 	b := CompactBlock{
 		StartUnixMS: int64(binary.BigEndian.Uint64(buf[0:8])),
-		IntervalUS: binary.BigEndian.Uint32(buf[8:12]),
-		Slots: make([]uint16, count),
+		IntervalUS:  binary.BigEndian.Uint32(buf[8:12]),
+		Slots:       make([]uint16, count),
 	}
 	for i := range b.Slots {
 		b.Slots[i] = binary.BigEndian.Uint16(buf[16+i*2 : 18+i*2])

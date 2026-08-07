@@ -34,21 +34,23 @@ func DefaultRuntimeConfig() RuntimeConfig {
 }
 
 type RuntimeStats struct {
-	Scheduler        SchedulerStats
-	Pending          int
-	Sent             uint64
-	Received         uint64
-	TimedOut         uint64
-	Invalid          uint64
-	AssociationError uint64
-	ActiveAssociations int
+	Scheduler            SchedulerStats
+	Pending              int
+	Sent                 uint64
+	Received             uint64
+	TimedOut             uint64
+	Invalid              uint64
+	AssociationError     uint64
+	AssociationReconnect uint64
+	ActiveAssociations   int
 }
 
 type nodeAssociation struct {
-	mu        sync.Mutex
-	assoc     *socks5udp.Association
-	backoff   time.Duration
-	nextRetry time.Time
+	mu            sync.Mutex
+	assoc         *socks5udp.Association
+	backoff       time.Duration
+	nextRetry     time.Time
+	everConnected bool
 }
 
 type Runtime struct {
@@ -62,16 +64,17 @@ type Runtime struct {
 	assocMu sync.Mutex
 	assocs  map[string]*nodeAssociation
 
-	probeID atomic.Uint64
+	probeID     atomic.Uint64
 	noncePrefix [4]byte
 
-	sent      atomic.Uint64
-	received  atomic.Uint64
-	timedOut  atomic.Uint64
-	invalid   atomic.Uint64
-	assocErr  atomic.Uint64
+	sent           atomic.Uint64
+	received       atomic.Uint64
+	timedOut       atomic.Uint64
+	invalid        atomic.Uint64
+	assocErr       atomic.Uint64
+	assocReconnect atomic.Uint64
 
-	OnSample func(nodeID, receiverID string, sample Sample)
+	OnSample func(nodeID, receiverID string, interval time.Duration, sample Sample)
 }
 
 func NewRuntime(cfg RuntimeConfig) (*Runtime, error) {
@@ -86,10 +89,10 @@ func NewRuntime(cfg RuntimeConfig) (*Runtime, error) {
 		return nil, err
 	}
 	return &Runtime{
-		cfg: cfg,
+		cfg:       cfg,
 		scheduler: NewScheduler(cfg.QueueCapacity, cfg.SchedulerTick),
-		pending: NewPendingTracker(cfg.MaxPending, cfg.ExpirationTick, 512),
-		paths: make(map[string]*RuntimePath), assocs: make(map[string]*nodeAssociation),
+		pending:   NewPendingTracker(cfg.MaxPending, cfg.ExpirationTick, 512),
+		paths:     make(map[string]*RuntimePath), assocs: make(map[string]*nodeAssociation),
 		noncePrefix: prefix,
 	}, nil
 }
@@ -107,11 +110,15 @@ func (r *Runtime) SetPaths(configs []PathConfig) {
 	old := r.paths
 	for _, cfg := range configs {
 		key := pathKey(cfg.NodeID, cfg.ReceiverID)
-		path := old[key]
-		if path == nil || path.Config.ProbeInterval != cfg.ProbeInterval {
-			path = &RuntimePath{Config: cfg, Window: NewWindow(r.cfg.WindowDuration, cfg.ProbeInterval, r.cfg.WindowHardMax)}
+		// RuntimePath scheduling fields are intentionally immutable after the path
+		// is published. A fresh wrapper avoids racing config refreshes against
+		// workers while the bounded Window and sequence counter retain continuity.
+		path := &RuntimePath{Config: cfg}
+		if previous := old[key]; previous != nil {
+			path.Window = previous.Window
+			path.seq.Store(previous.seq.Load())
 		} else {
-			path.Config = cfg
+			path.Window = NewWindow(r.cfg.WindowDuration, cfg.ProbeInterval, r.cfg.WindowHardMax)
 		}
 		paths = append(paths, path)
 		newMap[key] = path
@@ -240,6 +247,10 @@ func (r *Runtime) association(ctx context.Context, nodeID, socksAddress string) 
 		return nil, err
 	}
 	state.assoc = assoc
+	if state.everConnected {
+		r.assocReconnect.Add(1)
+	}
+	state.everConnected = true
 	state.backoff = 250 * time.Millisecond
 	state.nextRetry = time.Time{}
 	go r.readLoop(ctx, nodeID, assoc)
@@ -275,7 +286,7 @@ func (r *Runtime) readLoop(ctx context.Context, nodeID string, assoc *socks5udp.
 			continue
 		}
 		now := time.Now()
-		sample := Sample{At: now, Sequence: pending.Sequence, RTT: now.Sub(pending.SentAt), Status: SampleOK}
+		sample := Sample{At: pending.SentAt, Sequence: pending.Sequence, RTT: now.Sub(pending.SentAt), Status: SampleOK}
 		r.received.Add(1)
 		r.record(pending.Path, sample)
 	}
@@ -291,7 +302,7 @@ func (r *Runtime) expirer(ctx context.Context) {
 		case now := <-ticker.C:
 			for _, pending := range r.pending.Expire(now) {
 				r.timedOut.Add(1)
-				r.record(pending.Path, Sample{At: now, Sequence: pending.Sequence, Status: SampleLoss})
+				r.record(pending.Path, Sample{At: pending.SentAt, Sequence: pending.Sequence, Status: SampleLoss})
 			}
 		}
 	}
@@ -303,7 +314,7 @@ func (r *Runtime) record(path *RuntimePath, sample Sample) {
 	}
 	path.Window.Add(sample)
 	if r.OnSample != nil {
-		r.OnSample(path.Config.NodeID, path.Config.ReceiverID, sample)
+		r.OnSample(path.Config.NodeID, path.Config.ReceiverID, path.Config.ProbeInterval, sample)
 	}
 }
 
@@ -324,7 +335,7 @@ func (r *Runtime) invalidateAssociation(nodeID string, assoc *socks5udp.Associat
 		r.invalid.Add(1)
 		// Keep this out of packet-loss statistics. It is retained internally only
 		// as an invalid observation and renders as a graph gap.
-		r.record(pending.Path, Sample{At: time.Now(), Sequence: pending.Sequence, Status: SampleInvalid})
+		r.record(pending.Path, Sample{At: pending.SentAt, Sequence: pending.Sequence, Status: SampleInvalid})
 	}
 }
 
@@ -366,6 +377,6 @@ func (r *Runtime) Stats() RuntimeStats {
 	return RuntimeStats{
 		Scheduler: r.scheduler.Stats(), Pending: r.pending.Len(), Sent: r.sent.Load(),
 		Received: r.received.Load(), TimedOut: r.timedOut.Load(), Invalid: r.invalid.Load(),
-		AssociationError: r.assocErr.Load(), ActiveAssociations: active,
+		AssociationError: r.assocErr.Load(), AssociationReconnect: r.assocReconnect.Load(), ActiveAssociations: active,
 	}
 }

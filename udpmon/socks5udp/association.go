@@ -14,10 +14,10 @@ import (
 
 const (
 	socksVersion = 5
-	cmdAssociate  = 3
-	atypIPv4      = 1
-	atypDomain    = 3
-	atypIPv6      = 4
+	cmdAssociate = 3
+	atypIPv4     = 1
+	atypDomain   = 3
+	atypIPv6     = 4
 )
 
 var (
@@ -255,6 +255,10 @@ func (a *Association) ReadFrom(buffer []byte) (target string, payload []byte, er
 	}
 	target, payload, err = decodeDatagram(buffer[:n])
 	return target, payload, err
+}
+
+func (a *Association) SetReadDeadline(deadline time.Time) error {
+	return a.udp.SetReadDeadline(deadline)
 }
 
 func (a *Association) RelayAddress() *net.UDPAddr { return a.relay }

@@ -69,6 +69,12 @@ type CLI struct {
 		CustomAssetsPath    string `name:"web-custom-assets-path" help:"Path to custom assets directory (logo.svg, favicon.ico, custom.css, index.html)" default:"" env:"WEB_CUSTOM_ASSETS_PATH"`
 	} `embed:"" prefix:""`
 
+	UDP struct {
+		PanelURL      string `name:"udp-panel-url" help:"Panel internal URL used for UDP runtime configuration" default:"http://127.0.0.1:8081" env:"UDP_PANEL_URL"`
+		PanelToken    string `name:"udp-panel-token" help:"Bearer token for the Panel internal UDP API" default:"" env:"PANEL_CHECKER_INTERNAL_TOKEN"`
+		ConfigRefresh int    `name:"udp-config-refresh" help:"UDP runtime config refresh interval in seconds" default:"5" env:"UDP_CONFIG_REFRESH_SECONDS"`
+	} `embed:"" prefix:""`
+
 	Version  VersionFlag `name:"version" help:"Print version information and quit"`
 	RunOnce  bool        `name:"run-once" help:"Run one check cycle and exit" default:"false" env:"RUN_ONCE"`
 	LogLevel string      `name:"log-level" help:"Log level (debug|info|warn|error|none)" default:"info" env:"LOG_LEVEL"`

@@ -12,9 +12,9 @@ import (
 )
 
 const (
-	Version      = 1
-	HeaderSize   = 64
-	MACSize      = sha256.Size
+	Version       = 1
+	HeaderSize    = 64
+	MACSize       = sha256.Size
 	MinPacketSize = HeaderSize + MACSize
 	MaxPacketSize = 256
 )

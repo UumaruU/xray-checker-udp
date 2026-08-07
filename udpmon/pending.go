@@ -22,12 +22,12 @@ type pendingShard struct {
 // PendingTracker combines sharded lookup with a bounded expiration wheel.
 // Expiration is driven by one Runtime ticker; no probe owns a timer.
 type PendingTracker struct {
-	shards      []pendingShard
-	wheelMu     sync.Mutex
-	wheel       [][]uint64
-	tick        time.Duration
-	maxPending  int
-	count       int
+	shards     []pendingShard
+	wheelMu    sync.Mutex
+	wheel      [][]uint64
+	tick       time.Duration
+	maxPending int
+	count      int
 }
 
 func NewPendingTracker(maxPending int, tick time.Duration, wheelSlots int) *PendingTracker {

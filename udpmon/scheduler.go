@@ -20,9 +20,9 @@ type PathConfig struct {
 }
 
 type RuntimePath struct {
-	Config PathConfig
-	Window *Window
-	seq    atomic.Uint64
+	Config  PathConfig
+	Window  *Window
+	seq     atomic.Uint64
 	nextDue time.Time
 }
 
@@ -32,10 +32,11 @@ type ProbeJob struct {
 }
 
 type SchedulerStats struct {
-	Scheduled uint64
-	Dropped   uint64
-	LagNS     int64
-	Queue     int
+	Scheduled     uint64
+	Dropped       uint64
+	LagNS         int64
+	Queue         int
+	QueueCapacity int
 }
 
 // Scheduler uses one ticker for all paths and a bounded worker queue. Paths are
@@ -132,6 +133,6 @@ func (s *Scheduler) SetLag(lag time.Duration) { s.lagNS.Store(int64(lag)) }
 
 func (s *Scheduler) Stats() SchedulerStats {
 	return SchedulerStats{
-		Scheduled: s.scheduled.Load(), Dropped: s.dropped.Load(), LagNS: s.lagNS.Load(), Queue: len(s.jobs),
+		Scheduled: s.scheduled.Load(), Dropped: s.dropped.Load(), LagNS: s.lagNS.Load(), Queue: len(s.jobs), QueueCapacity: cap(s.jobs),
 	}
 }
