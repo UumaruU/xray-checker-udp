@@ -23,7 +23,7 @@ Message types: `1 PROBE_REQUEST`, `2 PROBE_RESPONSE`, `3 PEER_REQUEST`, `4 PEER_
 
 String stable IDs never отправляются в hot packet: wire ID — первые 64 bits SHA-256 от полной строки. Full ID остаётся в control plane.
 
-HMAC покрывает весь header + payload до MAC. Decoder сначала ограничивает размер и проверяет framing, затем MAC. Receiver также проверяет allowed clock skew, bounded replay cache и per-source/global rate limit. Bootstrap/permanent HTTP credentials не являются UDP HMAC key.
+HMAC покрывает весь header + payload до MAC. Decoder сначала ограничивает размер и проверяет framing, затем MAC. Receiver также проверяет allowed clock skew, bounded replay cache и per-source/global rate limit. Permanent HTTP credential не является UDP HMAC key. Только во время незавершённого pairing key version `0` временно использует `SHA-256(bootstrap token)`, чтобы Panel могла авторизованно проверить обратную UDP-доступность Receiver до его активации; после pairing этот key заменяется обычным data-plane key.
 
 Response сохраняет Probe ID, Sequence, Nonce, Receiver/Node ID и меняет только message type. Checker принимает response только если он совпал с существующей pending probe; поздние/неожиданные ответы игнорируются. Receiver не работает как unauthenticated echo.
 
@@ -33,4 +33,4 @@ Checker/peer monitor генерирует случайный process prefix, а 
 
 ## Key lifecycle
 
-Panel генерирует 32-byte data-plane key и хранит его через encrypted secret store. `keyVersion` позволяет совместимую ротацию. Receiver получает собственный key во время bootstrap/config sync; Checker получает необходимые keys только через authenticated internal API.
+Panel генерирует 32-byte data-plane key и хранит его через encrypted secret store. `keyVersion` позволяет совместимую ротацию. До активации Receiver слушает только временный bootstrap key version `0` и повторяет control-plane registration. Panel активирует Receiver лишь после успешного обратного UDP probe, затем Receiver атомарно переключается на постоянный data-plane key. Checker получает необходимые постоянные keys только через authenticated internal API.

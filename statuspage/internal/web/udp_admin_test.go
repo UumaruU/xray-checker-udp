@@ -23,7 +23,10 @@ func TestUDPAdminGraphNeverTurnsMissingIntoLoss(t *testing.T) {
 		t.Fatalf("status %d", rr.Code)
 	}
 	body := rr.Body.String()
-	for _, invariant := range []string{"v===65533)continue", "status:'loss'", "requestAnimationFrame", "slot*b.intervalUs/1000"} {
+	for _, invariant := range []string{
+		"v===65533)continue", "status:'loss'", "requestAnimationFrame", "slot*b.intervalUs/1000",
+		"addReceiver", "pairingModal", "method:'DELETE'", "addEventListener('wheel'", "zoomReset",
+	} {
 		if !strings.Contains(body, invariant) {
 			t.Fatalf("admin graph is missing invariant %q", invariant)
 		}

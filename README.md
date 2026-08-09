@@ -53,16 +53,16 @@ Checker/Prometheus: `http://SERVER:2112/`
 UDP по умолчанию выключен. В `/udp-admin`:
 
 1. Введите `PANEL_ADMIN_TOKEN`.
-2. Создайте Receiver (`Name`, публичный IP/FQDN, UDP port, опционально локальный VLESS SID).
-3. Panel выдаст одноразовый bootstrap и готовый Receiver Compose.
-4. Откройте указанный UDP port на сервере Receiver и запустите Compose.
-5. Включите UDP monitoring и выберите `All / Automatic / Selected` для нужных nodes.
+2. Создайте Receiver (`Name`, уникальный публичный IP/FQDN, UDP port, опционально один или несколько локальных VLESS SID через пробел).
+3. Panel откроет pairing-окно с готовым Receiver Compose и будет ждать обе стороны соединения.
+4. Откройте указанный UDP port на сервере Receiver и запустите Compose. Receiver сам повторяет Receiver → Panel handshake, а Panel проверяет обратный Panel → Receiver UDP path.
+5. Только после успешной двусторонней проверки Receiver появляется в рабочем списке. Затем включите UDP monitoring и выберите `All / Automatic / Selected` для нужных nodes.
 
 Сгенерированный Compose использует образ из `UDP_RECEIVER_IMAGE`. Для локальной разработки укажите собственный собранный tag; наличие GHCR-образа зависит от реально выполненного release workflow.
 
 ## Receiver на том же сервере, что VLESS
 
-Это рекомендуемый вариант, когда нет смысла покупать отдельные VPS. При создании Receiver укажите `Local VLESS SID`: Panel навсегда удерживает этот SID в exclusions для данного Receiver. Нулевой локальный RTT поэтому не искажает VPN-статистику.
+Это рекомендуемый вариант, когда нет смысла покупать отдельные VPS. При создании Receiver укажите `Local VLESS SID`: можно передать несколько SID через пробел. Panel удерживает все эти SID в exclusions для данного Receiver. Нулевой локальный RTT поэтому не искажает VPN-статистику.
 
 Например, при `DE/SE/FI/NL` каждый VLESS проверяется с остальных трёх серверов, а все четыре Receiver продолжают взаимные медленные peer probes. Центральный Checker коррелирует эти наблюдения; сами Receiver не решают, кто виноват.
 

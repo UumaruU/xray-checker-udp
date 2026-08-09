@@ -31,7 +31,7 @@ Threshold defaults: degraded loss `5%`, offline loss `95%`, robust jitter `25 ms
 - `Selected`: только явно выбранные.
 - `Automatic`: deterministic subset; default upper limit `5`.
 
-При небольшом числе Receiver нормальный выбор — `All`. Локальный VLESS SID co-located Receiver всегда возвращается в exclusions даже после ручного редактирования списка.
+При небольшом числе Receiver нормальный выбор — `All`. Поле локальных VLESS SID поддерживает несколько значений через пробел; все co-located SID всегда возвращаются в exclusions даже после ручного редактирования списка.
 
 ## Overload automation
 
