@@ -48,9 +48,21 @@ func (s *Server) receiverRegister(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	token, cfg, err := s.st.RegisterUDPReceiver(req.ReceiverID, req.BootstrapToken, req.Version, time.Now())
+	now := time.Now()
+	receiver, alreadyRegistered, err := s.st.PrepareUDPReceiverRegistration(req.ReceiverID, req.BootstrapToken, req.Version, now)
 	if err != nil {
 		http.Error(w, "registration rejected", http.StatusUnauthorized)
+		return
+	}
+	if !alreadyRegistered {
+		if err := probePendingReceiver(r.Context(), receiver, req.BootstrapToken); err != nil {
+			http.Error(w, "receiver reached panel; waiting for reverse UDP probe: "+err.Error(), http.StatusTooEarly)
+			return
+		}
+	}
+	token, cfg, err := s.st.FinishUDPReceiverRegistration(req.ReceiverID, req.BootstrapToken, req.Version, now)
+	if err != nil {
+		http.Error(w, "registration could not be finalized", http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"permanentToken": token, "config": cfg})
@@ -168,7 +180,7 @@ func (s *Server) adminUDPReceivers(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		compose := receiverCompose(s.cfg.ReceiverImage, panelURLForRequest(s.cfg.PanelPublicURL, r), created.Receiver.ID, created.BootstrapToken, created.Receiver.UDPPort)
-		writeJSON(w, http.StatusCreated, map[string]any{"receiver": created.Receiver, "bootstrapToken": created.BootstrapToken, "dockerCompose": compose})
+		writeJSON(w, http.StatusCreated, map[string]any{"receiver": created.Receiver, "bootstrapToken": created.BootstrapToken, "expiresTs": created.ExpiresTS, "dockerCompose": compose})
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -180,6 +192,40 @@ func (s *Server) adminUDPReceiver(w http.ResponseWriter, r *http.Request) {
 	}
 	path := strings.TrimPrefix(r.URL.Path, "/api/admin/udp/receivers/")
 	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) == 2 && parts[0] != "" && parts[1] == "pairing" && r.Method == http.MethodGet {
+		receiver, err := s.st.UDPReceiver(parts[0])
+		if err != nil {
+			http.Error(w, "receiver not found", http.StatusNotFound)
+			return
+		}
+		age := time.Since(time.Unix(receiver.HeartbeatTS, 0))
+		receiverToPanel := receiver.HeartbeatTS > 0 && age >= 0 && age < 10*time.Second
+		panelToReceiver := receiver.RegisteredTS > 0
+		panelProbeError := ""
+		if !panelToReceiver {
+			key, keyErr := s.st.UDPReceiverPairingKey(parts[0], time.Now())
+			if keyErr == nil {
+				if probeErr := probePendingReceiverKey(r.Context(), receiver, key); probeErr == nil {
+					panelToReceiver = true
+				} else {
+					panelProbeError = probeErr.Error()
+				}
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"receiver": receiver, "receiverToPanel": receiverToPanel,
+			"panelToReceiver": panelToReceiver, "panelProbeError": panelProbeError, "registered": receiver.RegisteredTS > 0,
+		})
+		return
+	}
+	if len(parts) == 1 && parts[0] != "" && r.Method == http.MethodDelete {
+		if err := s.st.DeleteUDPReceiver(parts[0]); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	if len(parts) == 1 && parts[0] != "" && r.Method == http.MethodPut {
 		var input store.UDPReceiver
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&input); err != nil {

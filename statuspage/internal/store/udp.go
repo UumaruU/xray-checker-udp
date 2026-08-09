@@ -9,8 +9,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/netip"
 	"strconv"
+	"strings"
 	"time"
+	"unicode"
 )
 
 const (
@@ -174,6 +177,87 @@ type CreateUDPReceiverInput struct {
 type CreatedUDPReceiver struct {
 	Receiver       UDPReceiver `json:"receiver"`
 	BootstrapToken string      `json:"bootstrapToken"`
+	ExpiresTS      int64       `json:"expiresTs"`
+}
+
+const udpBootstrapTTL = 24 * time.Hour
+
+func normalizeReceiverHost(host string) string {
+	host = strings.TrimSpace(host)
+	plain := strings.TrimPrefix(strings.TrimSuffix(host, "]"), "[")
+	if addr, err := netip.ParseAddr(plain); err == nil {
+		return addr.Unmap().String()
+	}
+	return strings.ToLower(strings.TrimSuffix(host, "."))
+}
+
+func splitNodeSIDs(raw string) []string {
+	parts := strings.FieldsFunc(raw, func(r rune) bool {
+		return unicode.IsSpace(r) || r == ',' || r == ';'
+	})
+	seen := make(map[string]bool, len(parts))
+	out := make([]string, 0, len(parts))
+	for _, sid := range parts {
+		sid = strings.TrimSpace(sid)
+		if sid == "" || seen[sid] {
+			continue
+		}
+		seen[sid] = true
+		out = append(out, sid)
+	}
+	return out
+}
+
+func normalizeCreateUDPReceiverInput(input CreateUDPReceiverInput) CreateUDPReceiverInput {
+	input.Name = strings.TrimSpace(input.Name)
+	input.Host = normalizeReceiverHost(input.Host)
+	input.Location = strings.TrimSpace(input.Location)
+	input.Description = strings.TrimSpace(input.Description)
+	input.LocalNodeSID = strings.Join(splitNodeSIDs(input.LocalNodeSID), " ")
+	return input
+}
+
+func (s *Store) receiverHostAvailable(host, exceptID string) (bool, error) {
+	var count int
+	if err := s.queryRow(`SELECT COUNT(1) FROM udp_receivers WHERE host=? AND id<>?`, host, exceptID).Scan(&count); err != nil {
+		return false, err
+	}
+	return count == 0, nil
+}
+
+func (s *Store) replacePendingReceiverAtHost(host string) error {
+	var id string
+	if err := s.queryRow(`SELECT id FROM udp_receivers WHERE host=? AND registered_ts=0 LIMIT 1`, host).Scan(&id); err != nil {
+		return nil
+	}
+	return s.DeleteUDPReceiver(id)
+}
+
+func (s *Store) cleanupExpiredUDPPairings(now time.Time) error {
+	rows, err := s.query(`SELECT id FROM udp_receivers WHERE registered_ts=0 AND bootstrap_expires>0 AND bootstrap_expires<?`, now.Unix())
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	_ = rows.Close()
+	for _, id := range ids {
+		if err := s.DeleteUDPReceiver(id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func randomToken(bytesN int) (string, error) {
@@ -202,8 +286,24 @@ func (s *Store) CreateUDPReceiver(input CreateUDPReceiverInput, now time.Time) (
 	if !s.SecretsEnabled() {
 		return CreatedUDPReceiver{}, ErrSecretsDisabled
 	}
+	input = normalizeCreateUDPReceiverInput(input)
 	if input.Name == "" || input.Host == "" || input.UDPPort < 1 || input.UDPPort > 65535 {
 		return CreatedUDPReceiver{}, errors.New("name, host and valid UDP port are required")
+	}
+	if err := s.cleanupExpiredUDPPairings(now); err != nil {
+		return CreatedUDPReceiver{}, err
+	}
+	// Starting a fresh pairing for an IP/host replaces an abandoned unfinished
+	// pairing, but never an already registered receiver.
+	if err := s.replacePendingReceiverAtHost(input.Host); err != nil {
+		return CreatedUDPReceiver{}, err
+	}
+	available, err := s.receiverHostAvailable(input.Host, "")
+	if err != nil {
+		return CreatedUDPReceiver{}, err
+	}
+	if !available {
+		return CreatedUDPReceiver{}, errors.New("receiver with this IP/host already exists")
 	}
 	id, err := randomToken(12)
 	if err != nil {
@@ -221,25 +321,22 @@ func (s *Store) CreateUDPReceiver(input CreateUDPReceiverInput, now time.Time) (
 		return CreatedUDPReceiver{}, err
 	}
 	revision := s.UDPRevision()
+	expires := now.Add(udpBootstrapTTL).Unix()
 	_, err = s.exec(`INSERT INTO udp_receivers(
 		id,name,host,udp_port,location,description,enabled,local_node_sid,
 		bootstrap_hash,bootstrap_expires,bootstrap_used,desired_revision,created_ts)
 		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		id, input.Name, input.Host, input.UDPPort, input.Location, input.Description, 1, input.LocalNodeSID,
-		tokenHash(bootstrap), now.Add(30*time.Minute).Unix(), 0, revision, now.Unix())
+		tokenHash(bootstrap), expires, 0, revision, now.Unix())
 	if err != nil {
+		_, _ = s.exec(`DELETE FROM secrets WHERE k=?`, "udp.receiver."+id+".key.1")
 		return CreatedUDPReceiver{}, err
 	}
-	if input.LocalNodeSID != "" {
-		_, _ = s.exec(`INSERT INTO udp_receiver_exclusions(receiver_id,node_sid) VALUES(?,?) ON CONFLICT DO NOTHING`, id, input.LocalNodeSID)
-	}
-	if revision, bumpErr := s.bumpUDPRevision(); bumpErr != nil {
-		return CreatedUDPReceiver{}, bumpErr
-	} else {
-		_, _ = s.exec(`UPDATE udp_receivers SET desired_revision=? WHERE id=?`, revision, id)
+	for _, sid := range splitNodeSIDs(input.LocalNodeSID) {
+		_, _ = s.exec(`INSERT INTO udp_receiver_exclusions(receiver_id,node_sid) VALUES(?,?) ON CONFLICT DO NOTHING`, id, sid)
 	}
 	receiver, _ := s.UDPReceiver(id)
-	return CreatedUDPReceiver{Receiver: receiver, BootstrapToken: bootstrap}, nil
+	return CreatedUDPReceiver{Receiver: receiver, BootstrapToken: bootstrap, ExpiresTS: expires}, nil
 }
 
 func (s *Store) UDPReceiver(id string) (UDPReceiver, error) {
@@ -259,7 +356,7 @@ func (s *Store) UDPReceiver(id string) (UDPReceiver, error) {
 }
 
 func (s *Store) UDPReceivers() ([]UDPReceiver, error) {
-	rows, err := s.query(`SELECT id FROM udp_receivers ORDER BY created_ts,id`)
+	rows, err := s.query(`SELECT id FROM udp_receivers WHERE registered_ts>0 ORDER BY created_ts,id`)
 	if err != nil {
 		return nil, err
 	}
@@ -284,19 +381,41 @@ func (s *Store) UDPReceivers() ([]UDPReceiver, error) {
 }
 
 func (s *Store) UpdateUDPReceiver(id string, input UDPReceiver) error {
+	input.Name = strings.TrimSpace(input.Name)
+	input.Host = normalizeReceiverHost(input.Host)
+	input.Location = strings.TrimSpace(input.Location)
+	input.Description = strings.TrimSpace(input.Description)
+	input.LocalNodeSID = strings.Join(splitNodeSIDs(input.LocalNodeSID), " ")
 	if id == "" || input.Name == "" || input.Host == "" || input.UDPPort < 1 || input.UDPPort > 65535 {
 		return errors.New("receiver name, host and valid UDP port are required")
+	}
+	var currentPort int
+	if err := s.queryRow(`SELECT udp_port FROM udp_receivers WHERE id=?`, id).Scan(&currentPort); err != nil {
+		return errors.New("receiver not found")
+	}
+	if input.UDPPort != currentPort {
+		return errors.New("receiver UDP port is fixed by its deployment; re-pair the receiver to change it")
+	}
+	available, err := s.receiverHostAvailable(input.Host, id)
+	if err != nil {
+		return err
+	}
+	if !available {
+		return errors.New("receiver with this IP/host already exists")
 	}
 	enabled := 0
 	if input.Enabled {
 		enabled = 1
 	}
-	result, err := s.exec(`UPDATE udp_receivers SET name=?,host=?,udp_port=?,location=?,description=?,enabled=? WHERE id=?`, input.Name, input.Host, input.UDPPort, input.Location, input.Description, enabled, id)
+	result, err := s.exec(`UPDATE udp_receivers SET name=?,host=?,udp_port=?,location=?,description=?,enabled=?,local_node_sid=? WHERE id=?`, input.Name, input.Host, input.UDPPort, input.Location, input.Description, enabled, input.LocalNodeSID, id)
 	if err != nil {
 		return err
 	}
 	if n, _ := result.RowsAffected(); n == 0 {
 		return errors.New("receiver not found")
+	}
+	for _, sid := range splitNodeSIDs(input.LocalNodeSID) {
+		_, _ = s.exec(`INSERT INTO udp_receiver_exclusions(receiver_id,node_sid) VALUES(?,?) ON CONFLICT DO NOTHING`, id, sid)
 	}
 	_, err = s.bumpUDPRevision()
 	return err
@@ -332,9 +451,10 @@ func (s *Store) SetUDPReceiverExclusions(receiverID string, nodeSIDs []string) e
 	_ = tx.QueryRow(`SELECT COALESCE(local_node_sid,'') FROM udp_receivers WHERE id=?`, receiverID).Scan(&local)
 	seen := map[string]bool{}
 	if local != "" {
-		nodeSIDs = append(nodeSIDs, local)
+		nodeSIDs = append(nodeSIDs, splitNodeSIDs(local)...)
 	}
 	for _, sid := range nodeSIDs {
+		sid = strings.TrimSpace(sid)
 		if sid == "" || seen[sid] {
 			continue
 		}
@@ -399,15 +519,60 @@ func (s *Store) receiverRuntimeConfig(id string) (UDPReceiverRuntimeConfig, erro
 	return cfg, nil
 }
 
-func (s *Store) RegisterUDPReceiver(id, bootstrapToken, version string, now time.Time) (permanentToken string, cfg UDPReceiverRuntimeConfig, err error) {
+func (s *Store) PrepareUDPReceiverRegistration(id, bootstrapToken, version string, now time.Time) (UDPReceiver, bool, error) {
 	var hash string
 	var expires int64
 	var used int
-	if err = s.queryRow(`SELECT COALESCE(bootstrap_hash,''),bootstrap_expires,bootstrap_used FROM udp_receivers WHERE id=?`, id).Scan(&hash, &expires, &used); err != nil {
+	var registered int64
+	if err := s.queryRow(`SELECT COALESCE(bootstrap_hash,''),bootstrap_expires,bootstrap_used,registered_ts FROM udp_receivers WHERE id=?`, id).Scan(&hash, &expires, &used, &registered); err != nil {
+		return UDPReceiver{}, false, err
+	}
+	if hash == "" || expires < now.Unix() || !tokenMatches(hash, bootstrapToken) {
+		return UDPReceiver{}, false, errors.New("bootstrap token is invalid or expired")
+	}
+	if used != 0 && registered == 0 {
+		return UDPReceiver{}, false, errors.New("receiver registration is inconsistent")
+	}
+	if used == 0 {
+		_, _ = s.exec(`UPDATE udp_receivers SET heartbeat_ts=?,version=? WHERE id=?`, now.Unix(), version, id)
+	}
+	receiver, err := s.UDPReceiver(id)
+	return receiver, used != 0 && registered > 0, err
+}
+
+func (s *Store) UDPReceiverPairingKey(id string, now time.Time) ([]byte, error) {
+	var hash string
+	var expires, registered int64
+	if err := s.queryRow(`SELECT COALESCE(bootstrap_hash,''),bootstrap_expires,registered_ts FROM udp_receivers WHERE id=?`, id).Scan(&hash, &expires, &registered); err != nil {
+		return nil, err
+	}
+	if registered > 0 || hash == "" || expires < now.Unix() {
+		return nil, errors.New("receiver pairing is not active")
+	}
+	key, err := hex.DecodeString(hash)
+	if err != nil || len(key) != sha256.Size {
+		return nil, errors.New("receiver pairing key is invalid")
+	}
+	return key, nil
+}
+
+func (s *Store) FinishUDPReceiverRegistration(id, bootstrapToken, version string, now time.Time) (permanentToken string, cfg UDPReceiverRuntimeConfig, err error) {
+	var hash string
+	var expires, registered int64
+	var used int
+	if err = s.queryRow(`SELECT COALESCE(bootstrap_hash,''),bootstrap_expires,bootstrap_used,registered_ts FROM udp_receivers WHERE id=?`, id).Scan(&hash, &expires, &used, &registered); err != nil {
 		return "", cfg, err
 	}
-	if used != 0 || expires < now.Unix() || !tokenMatches(hash, bootstrapToken) {
-		return "", cfg, errors.New("bootstrap token is invalid, expired or already used")
+	if hash == "" || expires < now.Unix() || !tokenMatches(hash, bootstrapToken) {
+		return "", cfg, errors.New("bootstrap token is invalid or expired")
+	}
+	if used != 0 && registered > 0 {
+		permanentToken, err = s.GetSecret("udp.receiver." + id + ".control")
+		if err != nil {
+			return "", cfg, err
+		}
+		cfg, err = s.receiverRuntimeConfig(id)
+		return permanentToken, cfg, err
 	}
 	permanentToken, err = randomToken(32)
 	if err != nil {
@@ -417,8 +582,20 @@ func (s *Store) RegisterUDPReceiver(id, bootstrapToken, version string, now time
 	if err != nil {
 		return "", cfg, err
 	}
-	_, err = s.exec(`UPDATE udp_receivers SET bootstrap_used=1,bootstrap_hash='',token_hash=?,registered_ts=?,heartbeat_ts=?,version=?,applied_revision=?,desired_revision=? WHERE id=?`,
-		tokenHash(permanentToken), now.Unix(), now.Unix(), version, cfg.Revision, cfg.Revision, id)
+	if err = s.SetSecret("udp.receiver."+id+".control", permanentToken); err != nil {
+		return "", cfg, err
+	}
+	_, err = s.exec(`UPDATE udp_receivers SET bootstrap_used=1,token_hash=?,registered_ts=?,heartbeat_ts=?,version=? WHERE id=?`,
+		tokenHash(permanentToken), now.Unix(), now.Unix(), version, id)
+	if err != nil {
+		return "", cfg, err
+	}
+	revision, err := s.bumpUDPRevision()
+	if err != nil {
+		return "", cfg, err
+	}
+	cfg.Revision = revision
+	_, err = s.exec(`UPDATE udp_receivers SET applied_revision=?,desired_revision=? WHERE id=?`, revision, revision, id)
 	return permanentToken, cfg, err
 }
 
@@ -433,7 +610,7 @@ func (s *Store) AuthenticateUDPReceiver(id, token string) bool {
 func (s *Store) HeartbeatUDPReceiver(id, version string, appliedRevision int64, health any, now time.Time) (UDPReceiverRuntimeConfig, bool, error) {
 	healthJSON, _ := json.Marshal(health)
 	desired := s.UDPRevision()
-	_, err := s.exec(`UPDATE udp_receivers SET heartbeat_ts=?,version=?,applied_revision=?,desired_revision=?,health_json=? WHERE id=?`,
+	_, err := s.exec(`UPDATE udp_receivers SET heartbeat_ts=?,version=?,applied_revision=?,desired_revision=?,health_json=?,bootstrap_hash='',bootstrap_expires=0 WHERE id=?`,
 		now.Unix(), version, appliedRevision, desired, string(healthJSON), id)
 	if err != nil {
 		return UDPReceiverRuntimeConfig{}, false, err
@@ -443,6 +620,85 @@ func (s *Store) HeartbeatUDPReceiver(id, version string, appliedRevision int64, 
 	}
 	cfg, err := s.receiverRuntimeConfig(id)
 	return cfg, true, err
+}
+
+func (s *Store) DeleteUDPReceiver(id string) error {
+	if strings.TrimSpace(id) == "" {
+		return errors.New("receiver id is required")
+	}
+	var registered int64
+	if err := s.queryRow(`SELECT registered_ts FROM udp_receivers WHERE id=?`, id).Scan(&registered); err != nil {
+		return errors.New("receiver not found")
+	}
+	tx, err := s.begin()
+	if err != nil {
+		return err
+	}
+	rows, err := tx.Query(`SELECT node_sid,selected_receivers FROM udp_node_settings`)
+	if err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	type nodeSelection struct{ sid, raw string }
+	var selections []nodeSelection
+	for rows.Next() {
+		var item nodeSelection
+		if err := rows.Scan(&item.sid, &item.raw); err != nil {
+			_ = rows.Close()
+			_ = tx.Rollback()
+			return err
+		}
+		selections = append(selections, item)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		_ = tx.Rollback()
+		return err
+	}
+	_ = rows.Close()
+	for _, item := range selections {
+		var selected []string
+		_ = json.Unmarshal([]byte(item.raw), &selected)
+		filtered := selected[:0]
+		for _, receiverID := range selected {
+			if receiverID != id {
+				filtered = append(filtered, receiverID)
+			}
+		}
+		if len(filtered) != len(selected) {
+			raw, _ := json.Marshal(filtered)
+			if _, err := tx.Exec(`UPDATE udp_node_settings SET selected_receivers=? WHERE node_sid=?`, string(raw), item.sid); err != nil {
+				_ = tx.Rollback()
+				return err
+			}
+		}
+	}
+	for _, q := range []string{
+		`DELETE FROM udp_receiver_exclusions WHERE receiver_id=?`,
+		`DELETE FROM udp_raw_blocks WHERE receiver_id=?`,
+		`DELETE FROM udp_aggregates WHERE receiver_id=?`,
+		`DELETE FROM udp_events WHERE receiver_id=?`,
+	} {
+		if _, err := tx.Exec(q, id); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+	}
+	if _, err := tx.Exec(`DELETE FROM secrets WHERE k=? OR k=?`, "udp.receiver."+id+".key.1", "udp.receiver."+id+".control"); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM udp_receivers WHERE id=?`, id); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if registered > 0 {
+		_, err = s.bumpUDPRevision()
+	}
+	return err
 }
 
 type UDPNodeSetting struct {

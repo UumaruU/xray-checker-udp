@@ -21,8 +21,8 @@ import (
 )
 
 const (
-	settingKey        = "web_enabled"
-	settingStateV2Key = "web_enabled_state_v2"
+	settingKey         = "web_enabled"
+	explicitSettingKey = "web_enabled_explicit_v2"
 )
 
 type Controller struct {
@@ -45,13 +45,16 @@ func New(cfg config.Config, st *store.Store, handler http.Handler) *Controller {
 // Enabled — должен ли веб-сервер быть поднят (по сохранённому состоянию).
 // По умолчанию (на первом запуске) — да, чтобы страница работала из коробки.
 func (c *Controller) Enabled() bool {
-	// До v2 Start() вызывал Stop(), который мог сохранить web_enabled=0 ещё
-	// до неудачного bind. Один раз игнорируем legacy-состояние, чтобы такие
-	// установки автоматически восстановились после обновления.
-	if c.st.GetSetting(settingStateV2Key, "") == "" {
+	if c.st.GetSetting(settingKey, "1") != "0" {
 		return true
 	}
-	return c.st.GetSetting(settingKey, "1") != "0"
+	// До v2 Start() вызывал Stop(), а Stop() сразу сохранял web_enabled=0.
+	// Если следующий bind падал (например, порт был занят), это значение
+	// оставалось в БД и навсегда отключало автозапуск. Старые "0" нельзя
+	// отличить от намеренного Stop(), поэтому один раз считаем их включёнными.
+	// Начиная с v2 Stop() ставит отдельный marker и явное выключение снова
+	// корректно переживает рестарты.
+	return c.st.GetSetting(explicitSettingKey, "0") != "1"
 }
 
 func (c *Controller) Running() bool {
@@ -71,9 +74,7 @@ func (c *Controller) domain() string {
 // (чтобы подхватить новый домен). Возвращает ошибку, если основной HTTP-порт
 // занять не удалось.
 func (c *Controller) Start() error {
-	// Перезапуск listener'ов не является пользовательской командой «выключить».
-	// Поэтому здесь не трогаем сохранённый web_enabled.
-	c.stopListeners()
+	c.stopListeners() // перезапуск не должен менять сохранённое enabled-состояние
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -92,7 +93,6 @@ func (c *Controller) Start() error {
 	}
 	servers = append(servers, httpSrv)
 	slog.Info("web: HTTP up", "addr", httpSrv.Addr)
-
 
 	// HTTPS, если задан домен — не критичен (HTTP уже живёт). Источник серта
 	// выбирается по TLS_MODE/CERT_FILE (см. tlsConfigFor): по умолчанию
@@ -122,11 +122,10 @@ func (c *Controller) Start() error {
 	c.servers = servers
 	c.running = true
 	_ = c.st.SetSetting(settingKey, "1")
-	_ = c.st.SetSetting(settingStateV2Key, "1")
+	_ = c.st.SetSetting(explicitSettingKey, "1")
 	return nil
 }
 
-// stopListeners гасит текущие listener'ы, не меняя пользовательское состояние.
 func (c *Controller) stopListeners() {
 	c.mu.Lock()
 	srvs := c.servers
@@ -139,13 +138,20 @@ func (c *Controller) stopListeners() {
 	for _, s := range srvs {
 		_ = s.Shutdown(ctx)
 	}
+
+	// Сбрасываем probe-кэш: после рестарта следующий Probe должен проверить
+	// уже новый listener, а не вернуть результат предыдущего запуска.
+	c.mu.Lock()
+	c.probeAt = time.Time{}
+	c.probeOK = false
+	c.mu.Unlock()
 }
 
 // Stop гасит публичные слушатели и помечает веб как явно выключенный.
 func (c *Controller) Stop() error {
 	c.stopListeners()
 	_ = c.st.SetSetting(settingKey, "0")
-	_ = c.st.SetSetting(settingStateV2Key, "1")
+	_ = c.st.SetSetting(explicitSettingKey, "1")
 	return nil
 }
 
