@@ -14,12 +14,21 @@ jobs:
     env:
       PANEL_CHECKER_INTERNAL_TOKEN: ci-internal-token
       PANEL_ADMIN_TOKEN: ci-admin-token
+      INTERNAL_PORT: "18081"
     steps:
       - uses: actions/checkout@v4
       - name: Validate prebuilt-image Compose
         run: docker compose config --quiet
+      - name: Validate configurable internal port wiring
+        run: |
+          docker compose config --format json > /tmp/compose.json
+          test "$(jq -r '.services.panel.environment.INTERNAL_PORT' /tmp/compose.json)" = "18081"
+          test "$(jq -r '.services.checker.environment.SUBSCRIPTION_URL' /tmp/compose.json)" = "http://127.0.0.1:18081/sub"
+          test "$(jq -r '.services.checker.environment.UDP_PANEL_URL' /tmp/compose.json)" = "http://127.0.0.1:18081"
       - name: Validate source-build Compose
         run: docker compose -f docker-compose.yml -f docker-compose.build.yml config --quiet
+      - name: Validate standalone Panel Compose example
+        run: docker compose -f statuspage/docker-compose.example.yml config --quiet
       - name: Validate source installer
         run: bash -n scripts/install-from-source.sh
 
