@@ -31,14 +31,13 @@
 Нужны Docker Compose v2 и два разных случайных секрета для внутренних API.
 
 ```bash
-export SUBSCRIPTION_URL='https://example.invalid/subscription'
-export PANEL_CHECKER_INTERNAL_TOKEN='replace-with-long-random-token'
-export PANEL_ADMIN_TOKEN='replace-with-another-long-random-token'
-export PANEL_PORT='18080'
-export PANEL_PUBLIC_URL='http://SERVER:18080'
+cp .env.example .env
+nano .env
 docker compose pull
 docker compose up -d
 ```
+
+В `.env` обязательно замените оба token и `SERVER` в `PANEL_PUBLIC_URL`.
 
 Обычная установка скачивает готовые `amd64/arm64`-образы Panel и Checker из
 GHCR и ничего не компилирует на VPS. По умолчанию используется тег `latest`.
@@ -67,6 +66,13 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --no-buil
 порт занят, укажите любой свободный, например `18080`. Для Receiver задайте
 `PANEL_PUBLIC_URL` как реально доступный адрес Panel (с тем же портом при
 прямом HTTP-доступе; за reverse proxy это обычно обычный HTTPS-домен).
+
+`INTERNAL_PORT` задаёт loopback-only порт связи Panel ↔ Checker и по умолчанию
+равен `8081`. Если он занят другим сервисом, задайте в `.env`, например,
+`INTERNAL_PORT=18081`: Compose автоматически применит один номер к Panel,
+subscription URL и UDP API Checker. Наружу этот порт публиковать не нужно.
+Эффективные внутренние адреса отображаются read-only в расширенных настройках
+`/udp-admin`; изменение `.env` требует пересоздания обоих контейнеров.
 
 Panel: `http://SERVER:PANEL_PORT/`
 UDP admin: `http://SERVER:PANEL_PORT/udp-admin`

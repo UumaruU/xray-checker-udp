@@ -268,7 +268,15 @@ func (s *Server) adminUDPSettings(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "database error", http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"settings": s.st.UDPSettings(), "revision": s.st.UDPRevision(), "performance": estimate})
+		internalURL := "http://127.0.0.1:" + s.cfg.InternalPort
+		writeJSON(w, http.StatusOK, map[string]any{
+			"settings": s.st.UDPSettings(), "revision": s.st.UDPRevision(), "performance": estimate,
+			"connectivity": map[string]string{
+				"internalPort":    s.cfg.InternalPort,
+				"subscriptionURL": internalURL + "/sub",
+				"udpPanelURL":     internalURL,
+			},
+		})
 	case http.MethodPut:
 		settings := s.st.UDPSettings()
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 128<<10)).Decode(&settings); err != nil {

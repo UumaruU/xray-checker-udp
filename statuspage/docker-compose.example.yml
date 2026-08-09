@@ -6,7 +6,7 @@ services:
     network_mode: host
     depends_on: [statuspage]
     environment:
-      SUBSCRIPTION_URL: "http://localhost:8081/sub"
+      SUBSCRIPTION_URL: "http://localhost:${INTERNAL_PORT:-8081}/sub"
       PROXY_CHECK_INTERVAL: "300"          # частота РЕАЛЬНЫХ проверок прокси (сек) — меняешь здесь
       SUBSCRIPTION_JSON_FORMAT: "true"     # балансиры-группы из XRAY_JSON проверяются по узлам; если панель JSON не отдаёт — работает как раньше
 
@@ -22,6 +22,7 @@ services:
       NOTIFY_CHAT_IDS: ""                  # чаты/группы/каналы для алертов: -1001234567890 или с топиком форума -1001234567890:42; неск. через запятую. Прав на бота не дают
       # --- базовое ---
       CHECKER_URL: "http://localhost:2112"
+      INTERNAL_PORT: "${INTERNAL_PORT:-8081}"
       TZ: "Europe/Moscow"
       TITLE: "Статус серверов"
       # --- За своим reverse-proxy (nginx/Caddy/Traefik): раскомментируй, и сервис

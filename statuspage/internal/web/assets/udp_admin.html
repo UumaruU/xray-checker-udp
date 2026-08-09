@@ -10,6 +10,12 @@
 @media(max-width:1050px){.receiverGrid{grid-template-columns:repeat(2,1fr)}.kpis{grid-template-columns:repeat(3,1fr)}.nodeRow{grid-template-columns:1fr 1fr}.nodeRow>:first-child{grid-column:1/-1}.receiverChecks{grid-column:1/-1}.settingsGrid,.switches{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:760px){.app{padding:16px 12px 44px}.topbar{align-items:flex-start;flex-direction:column}.adminAuth{width:100%}.adminAuth input{width:100%}.nav{overflow:auto}.span8,.span7,.span6,.span5,.span4{grid-column:span 12}.kpis{grid-template-columns:repeat(2,1fr)}.receiverGrid{grid-template-columns:1fr}.graphTools select{min-width:0;flex:1}.zoomTools{margin-left:0}.formGrid,.settingsGrid,.switches,.steps{grid-template-columns:1fr}.nodeRow{grid-template-columns:1fr}.nodeRow>:first-child,.receiverChecks{grid-column:auto}.canvasWrap{height:280px}}
 </style>
+<style>
+.connectivity{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin:0 0 12px}
+.connectivity .metaItem b{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+.connectivityHint{margin:-4px 0 12px;color:#6f7d91;font-size:10px}
+@media(max-width:760px){.connectivity{grid-template-columns:1fr}}
+</style>
 </head>
 <body>
 <main class="app">
@@ -53,6 +59,12 @@
     <details class="card span12" id="settings">
       <summary>Расширенные настройки UDP</summary>
       <div class="settingsBody">
+        <div class="connectivity">
+          <div class="metaItem"><span>INTERNAL_PORT</span><b id="internalPort">—</b></div>
+          <div class="metaItem"><span>Checker subscription</span><b id="internalSubscriptionURL">—</b></div>
+          <div class="metaItem"><span>Checker UDP API</span><b id="internalUDPPanelURL">—</b></div>
+        </div>
+        <div class="connectivityHint">Внутренний listener доступен только через loopback. Порт меняется в <code>INTERNAL_PORT</code> файла <code>.env</code> и применяется после пересоздания Panel и Checker.</div>
         <div class="settingsGrid">
           <div class="field"><label>Preset</label><select id="preset"><option value="realtime">Realtime · 10 Hz</option><option value="balanced">Balanced · 1 Hz</option><option value="low-load">Low-load · 0.2 Hz</option><option value="custom">Custom</option></select></div>
           <div class="field"><label>Probe interval, ms</label><input id="probeInterval" type="number" min="20"></div>
@@ -137,7 +149,8 @@ async function loadAdmin(silent=false){
 }
 
 function renderSettings(payload){
-  const s=state.settings||{},p=payload.performance||{};state.catchup=s.maxCatchupSpeed||1.5;
+  const s=state.settings||{},p=payload.performance||{},c=payload.connectivity||{};state.catchup=s.maxCatchupSpeed||1.5;
+  $('internalPort').textContent=c.internalPort||'—';$('internalSubscriptionURL').textContent=c.subscriptionURL||'—';$('internalUDPPanelURL').textContent=c.udpPanelURL||'—';
   $('preset').value=s.preset||'custom';$('probeInterval').value=s.probeIntervalMs||100;$('autoRate').checked=!!s.autoManageRate;$('autoReceivers').checked=!!s.autoManageReceivers;$('autoBuffer').checked=!!s.autoManageDisplayBuffer;$('prioritize').checked=!!s.prioritizeProblemNodes;$('minHz').value=s.minProbeHz||1;$('maxHz').value=s.maxProbeHz||10;$('displayBuffer').value=s.playbackDelayMs||1000;$('catchup').value=state.catchup;$('receiverLimit').value=s.autoReceiverLimit||5;
   $('pps').textContent=(p.probesPerSecond||0).toFixed(0);$('paths').textContent=p.activePaths||0;$('pps').title='compact raw ≈ '+fmtBytes(p.compactBytes24h||0)+' / '+(p.rawRetentionHours||24)+'h';updateReceiverCount();
 }

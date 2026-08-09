@@ -2,7 +2,7 @@
 
 ## Границы доверия
 
-Panel — control plane и source of truth. Checker получает UDP config только с `PANEL_CHECKER_INTERNAL_TOKEN`; admin API защищён отдельным `PANEL_ADMIN_TOKEN`. Не используйте один token для обеих ролей и не публикуйте внутренний Panel port `8081` наружу.
+Panel — control plane и source of truth. Checker получает UDP config только с `PANEL_CHECKER_INTERNAL_TOKEN`; admin API защищён отдельным `PANEL_ADMIN_TOKEN`. Не используйте один token для обеих ролей и не публикуйте настраиваемый внутренний Panel port (`INTERNAL_PORT`, по умолчанию `8081`) наружу.
 
 Receiver registration использует single-use bootstrap token с expiry 30 минут. После первого успешного exchange Panel удаляет bootstrap hash и выдаёт permanent bearer credential. Receiver сохраняет его в `/data/receiver-state.json` с mode `0600`.
 

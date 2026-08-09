@@ -5,7 +5,7 @@ services:
     network_mode: host
     environment:
       PORT: "${PANEL_PORT:-8080}"
-      INTERNAL_PORT: "8081"
+      INTERNAL_PORT: "${INTERNAL_PORT:-8081}"
       CHECKER_URL: "http://127.0.0.1:2112"
       SUBSCRIPTION_URL: "${SUBSCRIPTION_URL:-}"
       DB_DRIVER: "${DB_DRIVER:-sqlite}"
@@ -30,10 +30,10 @@ services:
       panel:
         condition: service_healthy
     environment:
-      SUBSCRIPTION_URL: "http://127.0.0.1:8081/sub"
+      SUBSCRIPTION_URL: "http://127.0.0.1:${INTERNAL_PORT:-8081}/sub"
       SUBSCRIPTION_JSON_FORMAT: "${SUBSCRIPTION_JSON_FORMAT:-true}"
       PANEL_CHECKER_INTERNAL_TOKEN: "${PANEL_CHECKER_INTERNAL_TOKEN:?set PANEL_CHECKER_INTERNAL_TOKEN}"
-      UDP_PANEL_URL: "http://127.0.0.1:8081"
+      UDP_PANEL_URL: "http://127.0.0.1:${INTERNAL_PORT:-8081}"
       PROXY_CHECK_INTERVAL: "${PROXY_CHECK_INTERVAL:-30}"
       XRAY_LOG_LEVEL: "${XRAY_LOG_LEVEL:-none}"
 
