@@ -6,6 +6,7 @@
 .env.*
 
 docs
+scripts
 statuspage
 test-files
 configs

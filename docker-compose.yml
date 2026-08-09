@@ -1,7 +1,6 @@
 services:
   panel:
-    build:
-      context: ./statuspage
+    image: "${XRAY_CHECKER_IMAGE_PREFIX:-ghcr.io/uumaruu/xray-checker-udp}-panel:${XRAY_CHECKER_VERSION:-latest}"
     restart: unless-stopped
     network_mode: host
     environment:
@@ -24,8 +23,7 @@ services:
       - panel-data:/data
 
   checker:
-    build:
-      context: .
+    image: "${XRAY_CHECKER_IMAGE_PREFIX:-ghcr.io/uumaruu/xray-checker-udp}-checker:${XRAY_CHECKER_VERSION:-latest}"
     restart: unless-stopped
     network_mode: host
     depends_on:

@@ -1,11 +1,16 @@
+# syntax=docker/dockerfile:1.7
+
 # --- build: статический бинарь без CGO ---
 FROM golang:1.26-alpine AS build
 ARG VERSION=go-build
 WORKDIR /src
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath \
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 go build -trimpath \
     -ldflags="-s -w -X xray-status/internal/version.Version=${VERSION}" \
     -o /app/statuspage ./cmd/statuspage \
  && mkdir -p /data

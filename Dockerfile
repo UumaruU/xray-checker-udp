@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.7
+
 FROM --platform=${BUILDPLATFORM:-linux/amd64} golang:1.26-alpine AS builder
 
 ARG TARGETPLATFORM
@@ -16,11 +18,14 @@ WORKDIR /go/src/github.com/${USERNAME}/${REPOSITORY_NAME}
 
 COPY go.mod go.mod
 COPY go.sum go.sum
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+  go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=${CGO_ENABLED} GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+RUN --mount=type=cache,target=/go/pkg/mod \
+  --mount=type=cache,target=/root/.cache/go-build \
+  CGO_ENABLED=${CGO_ENABLED} GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
   go build -ldflags="-s -w -X main.version=${GIT_TAG} -X main.commit=${GIT_COMMIT}" -installsuffix cgo -o /usr/bin/xray-checker .
 
 FROM alpine:3.21
