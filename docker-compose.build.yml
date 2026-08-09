@@ -1,0 +1,15 @@
+services:
+  panel:
+    image: xray-checker-udp-panel:local
+    build:
+      context: ./statuspage
+      args:
+        VERSION: local
+
+  checker:
+    image: xray-checker-udp-checker:local
+    build:
+      context: .
+      args:
+        GIT_TAG: local
+        GIT_COMMIT: local

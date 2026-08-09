@@ -36,7 +36,31 @@ export PANEL_CHECKER_INTERNAL_TOKEN='replace-with-long-random-token'
 export PANEL_ADMIN_TOKEN='replace-with-another-long-random-token'
 export PANEL_PORT='18080'
 export PANEL_PUBLIC_URL='http://SERVER:18080'
-docker compose up -d --build
+docker compose pull
+docker compose up -d
+```
+
+Обычная установка скачивает готовые `amd64/arm64`-образы Panel и Checker из
+GHCR и ничего не компилирует на VPS. По умолчанию используется тег `latest`.
+Для воспроизводимого обновления или rollback задайте одинаковый тег обоих
+образов, например `XRAY_CHECKER_VERSION=v0.2.0`, перед `pull` и `up`.
+
+Если нужно собрать текущие исходники локально, используйте запасной Compose и
+последовательную сборку. Это особенно важно на VPS с 1 vCPU / 2 GB RAM:
+
+```bash
+./scripts/install-from-source.sh
+```
+
+Скрипт сначала собирает Panel, затем Checker, поэтому две тяжёлые Go-сборки не
+конкурируют за CPU и RAM. BuildKit сохраняет кэш Go modules и build cache для
+последующих сборок. На минимальной VPS перед первой сборкой всё равно нужен
+swap и несколько гигабайт свободного диска. Ручной эквивалент:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.build.yml build panel
+docker compose -f docker-compose.yml -f docker-compose.build.yml build checker
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --no-build
 ```
 
 `PANEL_PORT` задаёт внешний HTTP-порт Panel и по умолчанию равен `8080`. Если
@@ -58,7 +82,7 @@ UDP по умолчанию выключен. В `/udp-admin`:
 4. Откройте указанный UDP port на сервере Receiver и запустите Compose. Receiver сам повторяет Receiver → Panel handshake, а Panel проверяет обратный Panel → Receiver UDP path.
 5. Только после успешной двусторонней проверки Receiver появляется в рабочем списке. Затем включите UDP monitoring и выберите `All / Automatic / Selected` для нужных nodes.
 
-Сгенерированный Compose использует образ из `UDP_RECEIVER_IMAGE`. Для локальной разработки укажите собственный собранный tag; наличие GHCR-образа зависит от реально выполненного release workflow.
+Сгенерированный Compose использует образ из `UDP_RECEIVER_IMAGE`. Для локальной разработки укажите собственный собранный tag.
 
 ## Receiver на том же сервере, что VLESS
 
@@ -106,7 +130,18 @@ Display buffer (`1 s` по умолчанию) сглаживает достав
 
 Перед обновлением сохраните Panel volume/SQLite DB (или сделайте backup PostgreSQL) и Receiver `/data`. UDP migration добавляет новые таблицы и не меняет семантику существующей TCP history. UDP по умолчанию можно оставить выключенным до регистрации Receiver.
 
-Для rollback остановите новый stack, восстановите предыдущие images/binaries и backup DB. Receiver credentials находятся только в его `/data`; потеря volume означает повторную регистрацию.
+Обновление готовых образов:
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+Для rollback задайте предыдущий release tag через `XRAY_CHECKER_VERSION`, снова
+выполните `pull` и `up -d`, затем при необходимости восстановите backup DB.
+Receiver credentials находятся только в его `/data`; потеря volume означает
+повторную регистрацию. Никогда не используйте `docker compose down -v` при
+обычном обновлении: `-v` удалит Panel volume.
 
 ## Диагностика
 
